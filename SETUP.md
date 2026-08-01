@@ -95,6 +95,28 @@ AI가 내 repo를 읽고 기록을 남기려면 열쇠가 필요합니다.
 
 ---
 
+## 6단계 (선택) — 논문 자동 수집 켜기 (2분)
+
+연구 주제를 따라가는 중이라면, **매주 새 논문**을 자동으로 모아 줄 수 있습니다.
+
+1. repo의 **`topics.yaml`** 을 편집합니다(GitHub 웹에서 연필 아이콘).
+2. 예시를 지우고 내 주제를 **영어 query**로 적습니다:
+   ```yaml
+   topics:
+     - id: my-lab
+       label: "우리 연구실 주제"
+       query: "neural prosthetics implantable electrode decoding"
+   ```
+3. 커밋하면 끝. 매주 월요일 아침에 돌면서 새 논문이 있으면 **Issue로 알려주고** `papers/inbox.md`에 모읍니다.
+4. 지금 당장 확인하려면: **Actions** 탭 → **paper-scan** → **Run workflow**
+
+세션에서 *"이번 주 새 논문 같이 보자"* 라고 하면 러너가 인박스에서 골라 줍니다.
+
+> ✅ **성공**: Actions에서 paper-scan이 초록불이고, `papers/inbox.md`가 갱신된다.
+> 💡 주제를 안 쓰면 아무 일도 일어나지 않습니다(안전).
+
+---
+
 ## 다음부터는
 
 GPT를 열고 **"오늘 세션 시작"** 한 마디면 됩니다. GPT가 알아서 지난 기록을 읽고 이어서 갑니다.
