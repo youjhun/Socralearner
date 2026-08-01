@@ -28,8 +28,13 @@ import sys
 
 MASTERY = "mastery.md"
 DAILY_DIR = "daily"
+MATERIALS_DIR = "materials"
 OUT = "concepts.json"
 SECTION = "개념 지도"
+
+# 선수관계를 읽을 곳. daily는 세션마다 한두 줄씩 쌓이고, materials는 강의자료에서
+# 증류한 개념 목록이라 한 번에 그래프의 뼈대가 들어온다. 둘 다 봐야 그래프가 채워진다.
+EDGE_DIRS = (DAILY_DIR, MATERIALS_DIR)
 
 # mastery.md 상태 → Topdown이 아는 어휘. `설명가능`만 '통과'로 친다.
 MASTERED = {"설명가능"}
@@ -116,9 +121,17 @@ def is_example_note(text):
     return "example" in [t.strip().strip("\"'") for t in tags.group(1).split(",")]
 
 
-def _daily_notes(daily_dir):
-    """수집 대상 노트 — 예시 노트는 뺀다."""
-    for path in sorted(glob.glob(os.path.join(daily_dir, "*.md"))):
+def _daily_notes(dirs=DAILY_DIR):
+    """수집 대상 노트 — 예시 노트는 뺀다.
+
+    `dirs`에 materials/를 함께 넘기면 증류된 강의자료도 읽는다(개념 지도 전용).
+    근거 수집에는 daily만 넘긴다 — 증류 자료는 사용자가 스스로 설명한 증거가 아니고,
+    그 문장이 근거로 붙으면 `is_example_note`가 막으려는 것과 같은 자기기만이 된다.
+    """
+    paths = []
+    for d in ([dirs] if isinstance(dirs, str) else dirs):
+        paths.extend(glob.glob(os.path.join(d, "*.md")))
+    for path in sorted(paths):
         with open(path, encoding="utf-8") as f:
             text = f.read()
         if is_example_note(text):
@@ -162,7 +175,7 @@ def parse_concept_map(daily_dir=DAILY_DIR):
     """
     edges = []
     domain_of = {}
-    for _path, text in _daily_notes(daily_dir):
+    for _path, text in _daily_notes(EDGE_DIRS):
         body = _section_body(text, SECTION)
         if not body:
             continue

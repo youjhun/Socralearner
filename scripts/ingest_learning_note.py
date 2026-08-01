@@ -30,6 +30,7 @@ import re
 import sys
 
 DAILY_DIR = "daily"
+MATERIALS_DIR = "materials"
 STATUS_PATH = "STATUS.md"
 LEARNING_ROOT = "."
 
@@ -151,6 +152,40 @@ def ensure_headings(body):
             extra += ["", f"## {heading}", "- (이번 세션 기록 없음)"]
         body = body.rstrip() + "\n" + "\n".join(extra) + "\n"
     return body, missing
+
+
+def build_material(payload, today):
+    """`[자료]` Issue → materials/<slug>.md — 강의자료(PDF)를 **1회 증류**한 파생 학습자료.
+
+    왜 이 경로인가: Custom GPT Action 응답은 텍스트라 repo의 PDF를 세션에서 읽을 수
+    없다. 그래서 PDF는 대화에 한 번 올리고, 요약(지도)·개념 지도·빈칸 문제 은행을
+    텍스트로 남긴다 — 이후 세션은 readFile로 끌어온다. 원문 PDF는 저장하지 않는다
+    (저작권·용량). 정규 헤딩 강제·STATUS/mastery 처리도 하지 않는다(세션 로그가 아니다).
+    """
+    raw = assemble(payload)
+    user_fm, body = split_frontmatter(raw)
+    title = payload.get("title") or ""
+    head, _, tail = title.partition("—")
+    if not tail:
+        head, _, tail = title.partition(" - ")
+    slug = user_fm.get("slug") or slugify(head) or f"material-{payload.get('number', '0')}"
+    display = (tail or head).strip()
+    display = re.sub(r"^\s*\[[^\]]*\]\s*", "", display).strip()
+    display = re.sub(r"^\d{4}-\d{2}-\d{2}\s*", "", display).strip() or slug
+    fm = [
+        "---",
+        f'title: "{display}"',
+        f"created: {today}",
+        f"updated: {today}",
+        "tags: [material, distilled]",
+        f'source: "자료 증류 → Issue #{payload.get("number")} (원문 PDF는 저장하지 않음)"',
+        "kind: material",
+        f"source_issue: {payload.get('number')}",
+        "---",
+    ]
+    if not re.match(r"^#\s", body):
+        body = f"# {display}\n\n" + body
+    return {"slug": slug, "content": "\n".join(fm) + "\n\n" + body.rstrip() + "\n"}
 
 
 def build_note(payload, today):
@@ -354,6 +389,43 @@ def main():
 
     with open(args.payload, encoding="utf-8") as f:
         payload = json.load(f)
+
+    # `[자료]` — 세션 로그가 아니라 증류된 학습자료다. 별도 경로로 저장하고 끝낸다.
+    if (payload.get("title") or "").startswith("[자료]"):
+        note = build_material(payload, args.today)
+        path = os.path.join(MATERIALS_DIR, f"{note['slug']}.md")
+        marker = f"source_issue: {payload.get('number')}"
+        if os.path.isdir(MATERIALS_DIR):
+            for name in sorted(os.listdir(MATERIALS_DIR)):
+                if name.endswith(".md"):
+                    cand = os.path.join(MATERIALS_DIR, name)
+                    with open(cand, encoding="utf-8") as f:
+                        if marker in f.read(2000):
+                            path = cand
+                            break
+        if args.dry_run:
+            print(f"[dry-run] {path}\n")
+            print(note["content"])
+            return
+        os.makedirs(MATERIALS_DIR, exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(note["content"])
+        report = [
+            f"✅ 자료 지도 저장 — `{path}` ({len(note['content'].splitlines())}줄)",
+            "",
+            "- 원문 PDF는 저장하지 않았다(저작권·용량) — 요약·개념 지도·빈칸 문제 은행만 남는다.",
+            "- 다음 세션부터 러너가 이 파일을 readFile로 끌어와 쓴다.",
+        ]
+        text = "\n".join(report)
+        print(text)
+        if args.report:
+            with open(args.report, "w", encoding="utf-8") as f:
+                f.write(text + "\n")
+        out = os.environ.get("GITHUB_OUTPUT")
+        if out:
+            with open(out, "a", encoding="utf-8") as f:
+                f.write(f"path={path}\n")
+        return
 
     note = build_note(payload, args.today)
     if len(note["content"].strip().splitlines()) < 4:
