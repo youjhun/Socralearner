@@ -300,14 +300,19 @@ def write_mastery_fragment(section, track, date, slug, note_path):
 
     if not track:
         ledgers = []
-        for root, _dirs, files in os.walk(LEARNING_ROOT):
+        for root, dirs, files in os.walk(LEARNING_ROOT):
+            # `presets/`는 복사해 쓰라고 둔 견본이지 활성 트랙이 아니다. 숨김 디렉터리도 후보가 아니다.
+            dirs[:] = [d for d in dirs if d != "presets" and not d.startswith(".")]
             if "mastery.md" in files:
                 ledgers.append(os.path.relpath(root, LEARNING_ROOT))
+        # 루트 원장이 있으면 그것이 기본 트랙이다 — 모호할 때 루트가 이긴다.
+        if "." in ledgers:
+            ledgers = ["."]
         if len(ledgers) != 1:
             return f"⚠️ 이해도 승급을 건너뛰었다 — `track:`이 없고 원장 후보가 {len(ledgers)}개다."
         track = ledgers[0]
 
-    mdir = os.path.join(LEARNING_ROOT, track, "mastery")
+    mdir = os.path.normpath(os.path.join(LEARNING_ROOT, track, "mastery"))
     if not os.path.isdir(os.path.join(LEARNING_ROOT, track)):
         return f"⚠️ 이해도 승급을 건너뛰었다 — 트랙 경로 없음: `{track}`"
     os.makedirs(mdir, exist_ok=True)
