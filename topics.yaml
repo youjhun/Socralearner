@@ -7,6 +7,10 @@
 # 쓰는 법: query는 **영어**로. 논문 검색은 영어가 압도적으로 잘 걸린다.
 # 필요 없으면 topics를 비워 두면 된다(그러면 아무것도 안 한다).
 #
+# ⚠️ 아래 topics가 비어 있으면 `papers/inbox.md`는 **계속 0편**이다. 켜는 가장 쉬운 길은
+#    Topdown 시작하기(/start)의 ④ 버튼 — 영어 검색어로 이 파일을 만들어 준다.
+#    논문을 다루는 나머지 경로는 PAPERS.md 참고.
+#
 # 수동으로 지금 당장 돌려보려면:
 #   repo → Actions → "paper-scan" → Run workflow
 

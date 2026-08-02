@@ -58,6 +58,7 @@ Socralearner는 매 세션 **내가 먼저 설명하고 → AI가 약한 곳을 
 | **[SETUP.md](./SETUP.md)** | 처음 세팅 A→Z (repo 만들기 → 토큰 → Custom GPT → 첫 세션) |
 | [GUIDE.md](./GUIDE.md) | 매일 어떻게 쓰나 · 기록 읽는 법 · 잘 쓰는 요령 |
 | [METHOD.md](./METHOD.md) | 왜 이렇게 공부하는가 (방법의 철학) |
+| **[PAPERS.md](./PAPERS.md)** | **논문은 어떻게 다루나** — 정독 세션 · 논문이 들어오는 4가지 길 · "Paper GPT는 어디 있나" |
 | [runner/](./runner/) | Custom GPT에 붙여넣을 지침 + Action 스키마 |
 | [topics.yaml](./topics.yaml) | 따라갈 연구 주제 — 적어 두면 **매주 새 논문 자동 수집** |
 | [presets/toeic/](./presets/toeic/) | **시험 트랙 프리셋** — 토익 등 시험은 별도 repo로 (섞으면 개념 그래프가 오염된다) |
