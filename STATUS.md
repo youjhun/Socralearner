@@ -2,6 +2,7 @@
 title: "학습 상태 — 러너 진입점"
 updated: 2026-08-01
 kind: status
+setup: pending   # ← 아직 채우지 않은 템플릿이라는 표시. 첫 세션에서 트랙이 채워지면 CI가 지운다.
 ---
 
 # 🎯 학습 상태 (Runner Entrypoint)

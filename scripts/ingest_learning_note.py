@@ -376,6 +376,10 @@ def apply_status_patch(patch, today):
             if line.startswith("updated:"):
                 lines[i] = f"updated: {today}"
                 break
+        # 트랙이 실제 값으로 바뀌었으면 "아직 템플릿" 표시를 지운다. 이 표시가 남아 있으면
+        # 러너가 매 세션 STATUS를 미세팅으로 판정해 첫 세션 대본을 무한 반복한다.
+        if any("활성트랙" in normalize_heading(s) for s in applied):  # normalize는 공백을 지운다
+            lines = [l for i, l in enumerate(lines) if not (i < 20 and l.startswith("setup:") and "pending" in l)]
         with open(STATUS_PATH, "w", encoding="utf-8") as f:
             f.write("\n".join(lines).rstrip() + "\n")
     return applied
