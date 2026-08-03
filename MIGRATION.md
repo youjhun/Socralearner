@@ -37,14 +37,15 @@
 ## 🎉 먼저 — 이걸 한 번만 하면 다음부터는 자동입니다
 
 지금까지는 템플릿이 고쳐질 때마다 이 문서를 보고 손으로 파일을 복사해야 했습니다.
-**이제 안 그래도 됩니다.** 아래 파일 3개를 한 번만 가져오면, 다음부터는 템플릿이 바뀔 때마다
+**이제 안 그래도 됩니다.** 아래 **파일 하나만** 가져오면, 다음부터는 템플릿이 바뀔 때마다
 내 저장소에 **자동으로 적용되고 Issue로 알려 줍니다.** 머지도 안 눌러도 됩니다.
 
 | 가져올 파일 | 무엇 |
 |---|---|
-| `.github/workflows/template-sync.yml` | 매주 월요일에 템플릿을 확인해 적용한다 |
-| `scripts/sync_from_template.py` | 엔진만 가져오고 내 기록은 건드리지 않는다 |
-| `scripts/test_sync_from_template.py` | 그 약속을 적용 **전에** 매번 검사한다 |
+| [`.github/workflows/template-sync.yml`](https://github.com/youjhun/Socralearner/blob/main/.github/workflows/template-sync.yml) | 매주 월요일에 템플릿을 확인해 적용한다 |
+
+이거 하나뿐입니다. 동기화 로직은 **매번 템플릿에서 새로 받아 실행**하므로 저장소에 미리
+넣어 둘 필요가 없습니다(그래야 로직이 낡아 동기화가 실패하는 자기모순이 안 생깁니다).
 
 가져오는 법은 아래 [1단계](#1단계--바뀐-파일-가져오기-5분)와 같습니다(웹 복사 또는 git).
 바로 확인하려면 **Actions → template-sync → Run workflow**.
