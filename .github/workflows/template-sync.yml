@@ -1,0 +1,118 @@
+name: template-sync
+
+# 템플릿 업데이트 받아오기 — 주 1회 확인하고, 바뀐 게 있으면 **PR로** 알려준다.
+#
+# 왜: `Use this template`로 만든 저장소는 그 시점의 복사본이라 템플릿이 고쳐져도
+# 따라오지 않는다. 그래서 고칠 때마다 쓰는 사람들에게 "이 파일들을 복사하세요"라고
+# 전해야 했는데, 계속 생기면 아무도 안 한다 — 결국 각자 다른 버전을 쓰게 되고
+# 버그 보고가 재현되지 않는다. 이 워크플로가 그 전달을 대신한다.
+#
+# 경계: 가져오는 것은 **엔진**(scripts · runner · presets · templates · workflows · 문서)뿐이다.
+# 내 기록과 설정(daily · materials · papers · mastery · STATUS · drills · concepts.json ·
+# topics.yaml · README)은 어느 경우에도 건드리지 않는다 — 목록은 scripts/sync_from_template.py에 있다.
+#
+# 그리고 **자동으로 합치지 않는다.** PR을 열어 둘 뿐이라, 무엇이 바뀌는지 보고 내가 누른다.
+
+on:
+  schedule:
+    # 매주 월요일 09:20 KST (UTC 00:20). paper-scan(08:10 KST)보다 뒤에 둬서
+    # 같은 시각에 두 워크플로가 같은 브랜치를 밀지 않게 한다.
+    - cron: "20 0 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: template-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    # 템플릿 저장소 자신에서는 돌 필요가 없다(자기와 동기화하는 꼴).
+    if: github.repository != 'youjhun/Socralearner'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 경로 정책 자체 점검 (내 기록을 덮지 않는지)
+        run: python3 scripts/test_sync_from_template.py
+
+      - name: 템플릿 내려받기
+        run: |
+          mkdir -p /tmp/tpl
+          curl -fsSL https://codeload.github.com/youjhun/Socralearner/tar.gz/refs/heads/main \
+            | tar xz -C /tmp/tpl --strip-components=1
+          echo "받은 파일 $(find /tmp/tpl -type f | wc -l)개"
+
+      - name: 바뀐 것 가져오기
+        id: sync
+        run: python3 scripts/sync_from_template.py --from /tmp/tpl
+
+      - name: 바뀐 게 있으면 PR 열기
+        if: steps.sync.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          BRANCH="template-sync/$(date -u +%Y-%m-%d)"
+          git config user.name  "socralearner[bot]"
+          git config user.email "noreply@github.com"
+          git checkout -B "$BRANCH"
+          git add -A
+          git commit -m "템플릿 업데이트 가져오기 ($(date -u +%F))"
+          git push -f origin "$BRANCH"
+
+          # 무엇이 왜 바뀌었는지는 템플릿의 CHANGELOG가 말한다 — 최근 항목을 붙인다.
+          NOTES=$(sed -n '/^## /,$p' /tmp/tpl/CHANGELOG.md 2>/dev/null | head -60)
+
+          if gh pr view "$BRANCH" --json number >/dev/null 2>&1; then
+            echo "이미 열린 PR이 있다 — 브랜치만 갱신했다"; exit 0
+          fi
+
+          gh pr create \
+            --title "템플릿 업데이트 — ${{ steps.sync.outputs.summary }}" \
+            --head "$BRANCH" \
+            --body "$(cat <<EOF
+          Socralearner 템플릿이 업데이트됐습니다. **엔진 부분만** 가져왔습니다.
+
+          ${{ steps.sync.outputs.summary }}
+
+          ## 내 기록은 그대로입니다
+
+          \`daily/\` · \`materials/\` · \`papers/\` · \`mastery.md\` · \`STATUS.md\` ·
+          \`drills.md\` · \`concepts.json\` · \`topics.yaml\` · \`README.md\` 는
+          **어느 경우에도 건드리지 않습니다.** 바뀐 파일 목록은 아래 diff에서 확인하세요.
+
+          ## 무엇이 바뀌었나
+
+          $NOTES
+
+          ## 하면 되는 일
+
+          1. 아래 **Files changed** 를 훑어봅니다.
+          2. **Merge** 를 누릅니다.
+          3. 러너 지침(\`runner/instructions.md\`)이 바뀌었다면 — CHANGELOG에 ⚠️ 로
+             표시돼 있습니다 — ChatGPT의 내 GPT 편집에서 지침을 **다시 붙여넣습니다.**
+             이건 자동으로 안 됩니다.
+
+          <sub>이 PR은 \`template-sync\` 워크플로가 매주 월요일에 확인해 자동으로 엽니다.
+          그만 받고 싶으면 Actions 탭에서 이 워크플로를 비활성화하면 됩니다.</sub>
+          EOF
+          )"
+
+      - name: 실패를 조용히 넘기지 않는다
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const url = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `[템플릿] 업데이트 확인 실패 — ${new Date().toISOString().slice(0, 10)}`,
+              body: `템플릿 동기화가 실패했습니다 — [실행 로그](${url})\n\n` +
+                    `흔한 원인: 저장소 설정에서 **Settings → Actions → General →** ` +
+                    `**"Allow GitHub Actions to create and approve pull requests"** 가 꺼져 있음.\n` +
+                    `켠 뒤 Actions 탭에서 **template-sync → Run workflow** 로 다시 돌리면 됩니다.`,
+            });

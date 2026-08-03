@@ -34,6 +34,35 @@
 
 ---
 
+## 🎉 먼저 — 이걸 한 번만 하면 다음부터는 자동입니다
+
+지금까지는 템플릿이 고쳐질 때마다 이 문서를 보고 손으로 파일을 복사해야 했습니다.
+**이제 안 그래도 됩니다.** 아래 파일 3개를 한 번만 가져오면, 다음부터는 템플릿이 바뀔 때마다
+내 저장소에 **PR이 자동으로 열립니다**. 보고 머지만 누르면 됩니다.
+
+| 가져올 파일 | 무엇 |
+|---|---|
+| `.github/workflows/template-sync.yml` | 매주 월요일에 템플릿을 확인해 PR을 연다 |
+| `scripts/sync_from_template.py` | 엔진만 가져오고 내 기록은 건드리지 않는다 |
+| `scripts/test_sync_from_template.py` | 그 약속을 CI가 매번 검사한다 |
+
+가져오는 법은 아래 [1단계](#1단계--바뀐-파일-가져오기-5분)와 같습니다(웹 복사 또는 git).
+
+그다음 **한 번만** 설정을 켜 주세요:
+**Settings → Actions → General → Workflow permissions →
+"Allow GitHub Actions to create and approve pull requests"** 체크.
+(이게 꺼져 있으면 PR을 못 만들고, 워크플로가 실패 Issue로 알려 줍니다.)
+
+바로 확인하려면 **Actions → template-sync → Run workflow**.
+
+> 무엇을 가져오나: `scripts/` · `runner/` · `presets/` · `templates/` ·
+> `.github/workflows/` · 문서.
+> **절대 안 가져오는 것**: `daily/` · `materials/` · `papers/` · `mastery.md` ·
+> `mastery/` · `STATUS.md` · `drills.md` · `concepts.json` · `topics.yaml` · `README.md`.
+> 이 약속은 `scripts/test_sync_from_template.py`가 매 실행마다 검사합니다.
+
+---
+
 ## 2026-08-03 — paper-scan이 주제를 넣어도 0편만 나오던 문제
 
 `topics.yaml`에 주제를 넣었는데 인박스가 계속 "0편"이었다면 이 버그입니다.
