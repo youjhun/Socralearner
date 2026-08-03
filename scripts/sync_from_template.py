@@ -70,6 +70,7 @@ NEVER = (
     "concepts.json",
     "topics.yaml",
     "README.md",
+    "pilot/",  # 파일럿 롤업 산출물 — 내 저장소에서 계산된 내 수치다(pilot_rollup.py)
 )
 
 
