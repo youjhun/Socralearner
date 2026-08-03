@@ -28,6 +28,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: 선별 로직 자체 점검 (네트워크 없음)
+        run: python3 scripts/test_scan_papers.py
+
       - name: 새 논문 수집
         id: scan
         run: |
