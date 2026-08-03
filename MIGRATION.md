@@ -34,6 +34,52 @@
 
 ---
 
+## 🎉 먼저 — 이걸 한 번만 하면 다음부터는 자동입니다
+
+지금까지는 템플릿이 고쳐질 때마다 이 문서를 보고 손으로 파일을 복사해야 했습니다.
+**이제 안 그래도 됩니다.** 아래 파일 3개를 한 번만 가져오면, 다음부터는 템플릿이 바뀔 때마다
+내 저장소에 **PR이 자동으로 열립니다**. 보고 머지만 누르면 됩니다.
+
+| 가져올 파일 | 무엇 |
+|---|---|
+| `.github/workflows/template-sync.yml` | 매주 월요일에 템플릿을 확인해 PR을 연다 |
+| `scripts/sync_from_template.py` | 엔진만 가져오고 내 기록은 건드리지 않는다 |
+| `scripts/test_sync_from_template.py` | 그 약속을 CI가 매번 검사한다 |
+
+가져오는 법은 아래 [1단계](#1단계--바뀐-파일-가져오기-5분)와 같습니다(웹 복사 또는 git).
+
+그다음 **한 번만** 설정을 켜 주세요:
+**Settings → Actions → General → Workflow permissions →
+"Allow GitHub Actions to create and approve pull requests"** 체크.
+(이게 꺼져 있으면 PR을 못 만들고, 워크플로가 실패 Issue로 알려 줍니다.)
+
+바로 확인하려면 **Actions → template-sync → Run workflow**.
+
+> 무엇을 가져오나: `scripts/` · `runner/` · `presets/` · `templates/` ·
+> `.github/workflows/` · 문서.
+> **절대 안 가져오는 것**: `daily/` · `materials/` · `papers/` · `mastery.md` ·
+> `mastery/` · `STATUS.md` · `drills.md` · `concepts.json` · `topics.yaml` · `README.md`.
+> 이 약속은 `scripts/test_sync_from_template.py`가 매 실행마다 검사합니다.
+
+---
+
+## 2026-08-03 — paper-scan이 주제를 넣어도 0편만 나오던 문제
+
+`topics.yaml`에 주제를 넣었는데 인박스가 계속 "0편"이었다면 이 버그입니다.
+
+| 무엇 | 왜 그랬나 |
+|---|---|
+| **초록 없는 논문을 전부 버렸다** | OpenAlex는 출판사 라이선스 때문에 상당수 논문의 초록을 주지 않습니다 — 특히 신간이 그렇습니다. API가 25편을 정상으로 돌려줘도 선별 결과가 **0편**이 됐습니다. 이제 초록이 없어도 버리지 않고 뒤로만 밉니다 |
+| **조회 실패가 성공으로 처리됐다** | 모든 주제의 조회가 죽어도 종료 코드가 0이라, 인박스엔 "0편"이 적히고 실패 알림 Issue도 안 떴습니다. 이제 전부 실패하면 실패로 끝나고 Issue가 옵니다 |
+| **공용 대기열에서 막혔다** | OpenAlex에 이메일을 안 주면 공용 대기열인데 GitHub Actions는 IP를 많이 공유합니다. `topics.yaml`에 `mailto:` 한 줄을 넣으면 여유 있는 대기열로 갑니다. 일시적 오류는 이제 3번까지 다시 시도합니다 |
+
+**가져올 파일**: `scripts/scan_papers.py` · `scripts/test_scan_papers.py`(신규) ·
+`.github/workflows/paper-scan.yml` · `topics.yaml`(mailto 주석만 참고, 내 주제는 유지)
+
+가져온 뒤 **Actions → paper-scan → Run workflow**로 즉시 돌려 확인하세요.
+
+---
+
 ## 1단계 — 바뀐 파일 가져오기 (5분)
 
 ### 방법 A. 웹에서 복사 (git을 몰라도 됩니다 · 권장)
