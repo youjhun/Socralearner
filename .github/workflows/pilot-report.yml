@@ -1,0 +1,93 @@
+name: pilot-report
+
+# 파일럿 주간 롤업 — 내 학습 저장소의 **익명 수치**를 주 1회 만든다.
+#
+# ⚠️ 기본값은 **꺼짐**이다. 저장소 변수 `PILOT_PARTICIPANT`(예: P01)를 설정하지 않으면
+# 이 워크플로는 아무것도 계산하지 않고 아무것도 내보내지 않는다. 파일럿에 참여하지
+# 않는 사람에게는 존재하지 않는 것과 같다 — 동의가 기본값이 아니다.
+#
+# 무엇이 나가나: 세션 수·간격·개념 상태 분포·전이·재검증·산출물 수 같은 **수치뿐**이다.
+# 노트 원문·개념 이름·목표·저장소 이름은 나가지 않는다(`scripts/pilot_rollup.py` 계약,
+# `scripts/test_pilot_rollup.py`가 강제).
+#
+# 전송은 저장소 공개 여부에 따라 두 갈래이고, **계산은 양쪽이 같다**:
+#   · 공개(pull) — `pilot/rollup.json`을 내 저장소에 커밋한다. 유지훈이 공개 API로 읽는다.
+#   · 비공개(push) — 위에 더해, `PILOT_REPORT_TOKEN` 시크릿이 있으면 중앙 저장소에
+#     Issue로 올린다. 비공개로 바꿔도 계산과 파일은 그대로다.
+#
+# 이 파일은 일부러 얇다 — 로직은 scripts/에 있다(Actions 기본 토큰은 워크플로 파일을
+# 수정할 수 없어 이 파일만 자동 배포되지 않는다).
+#
+# 경계: 이 워크플로가 쓰는 경로는 `pilot/**` 뿐이다.
+
+on:
+  schedule:
+    # 매주 월요일 09:20 KST (UTC 00:20 월요일) — 주간 루틴이 몰리는 시간대를 피한다.
+    - cron: "20 0 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: pilot-report
+  cancel-in-progress: false
+
+jobs:
+  rollup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 참여 여부 확인 (미설정이면 여기서 끝)
+        id: gate
+        env:
+          PARTICIPANT: ${{ vars.PILOT_PARTICIPANT }}
+        run: |
+          if [ -z "$PARTICIPANT" ]; then
+            echo "PILOT_PARTICIPANT 변수가 없다 — 이 저장소는 파일럿 집계 대상이 아니다. 아무것도 하지 않는다."
+            echo "on=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "on=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: 유출 방지 계약 자체 점검 (네트워크 없음)
+        if: steps.gate.outputs.on == 'true'
+        run: python3 scripts/test_pilot_rollup.py
+
+      - name: 롤업 계산
+        if: steps.gate.outputs.on == 'true'
+        run: |
+          python3 scripts/pilot_rollup.py \
+            --participant "${{ vars.PILOT_PARTICIPANT }}" \
+            --today "$(TZ=Asia/Seoul date +%F)" \
+            --out pilot/rollup.json
+
+      - name: 내 저장소에 커밋 (pull 경로)
+        if: steps.gate.outputs.on == 'true'
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add pilot/rollup.json
+          git diff --cached --quiet && echo "변화 없음 — 커밋하지 않는다" && exit 0
+          git commit -m "파일럿 롤업 $(TZ=Asia/Seoul date +%F)"
+          git push
+
+      # 비공개 저장소용. 시크릿이 없으면 스크립트가 그냥 끝낸다(에러 아님) —
+      # 공개로 쓰는 동안은 필요 없고, 비공개로 바꿀 때 시크릿 하나만 넣으면 된다.
+      # 조건에 `env.TOKEN != ''`를 쓰지 않는 이유: 스텝 자신의 env는 그 스텝의 if에서
+      # 참조가 보장되지 않아 조용히 항상-거짓이 될 수 있다. 판단은 스크립트가 한다.
+      - name: 중앙 저장소로 전송 (push 경로 — 시크릿이 있을 때만)
+        if: steps.gate.outputs.on == 'true'
+        env:
+          TOKEN: ${{ secrets.PILOT_REPORT_TOKEN }}
+          CENTRAL: ${{ vars.PILOT_CENTRAL_REPO }}
+          PARTICIPANT: ${{ vars.PILOT_PARTICIPANT }}
+        run: python3 scripts/pilot_report_send.py --rollup pilot/rollup.json
+
+      - name: 실패를 조용히 넘기지 않는다
+        if: failure() && steps.gate.outputs.on == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/ci_notify_failure.py "파일럿 롤업"

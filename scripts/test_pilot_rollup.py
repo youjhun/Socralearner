@@ -162,7 +162,15 @@ def main():
         finally:
             shutil.rmtree(empty, ignore_errors=True)
 
-        print("\n⑥ 익명 ID를 강제한다")
+        print("\n⑥ 전송 허용 키와 롤업 키가 갈라지지 않는다")
+        import pilot_report_send as send  # noqa: PLC0415 — 이 검사에서만 필요
+
+        missing = set(data) - send.ALLOWED_KEYS
+        stale = send.ALLOWED_KEYS - set(data)
+        check("롤업의 모든 키가 전송 허용 목록에 있다", not missing, str(sorted(missing)))
+        check("전송 허용 목록에 죽은 키가 없다", not stale, str(sorted(stale)))
+
+        print("\n⑦ 익명 ID를 강제한다")
         for bad in ("youjhun", "friend1/study", "P0", ""):
             try:
                 rollup.rollup(root, bad, week="2026-W32", today="2026-08-07")
