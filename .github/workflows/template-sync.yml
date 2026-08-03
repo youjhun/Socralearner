@@ -2,21 +2,20 @@ name: template-sync
 
 # 템플릿 업데이트 받아오기 — 주 1회 확인하고 **바로 적용한다.**
 #
-# 이 파일은 일부러 **얇다.** 로직은 전부 `scripts/template_sync_ci.py`에 있다.
+# 이 파일이 **쓰는 사람이 설치할 유일한 파일**이다. 로직은 템플릿에서 받아 온 것을
+# 그대로 실행한다(`/tmp/tpl/scripts/...`).
 #
-# 왜: Actions의 기본 토큰은 `.github/workflows/` 아래를 수정할 수 없다(푸시 거부).
-# 그래서 워크플로 안에 로직을 적어 두면, 그 로직을 고칠 때마다 자동 배포가 끊기고
-# 쓰는 사람마다 손으로 파일을 복사해야 한다. 로직을 scripts/로 내려 두면 그쪽은
-# 자유롭게 동기화되므로 **앞으로 고치는 것은 전부 자동으로 퍼진다.**
-# 이 파일은 일정·권한이 바뀔 때만 손대면 되고, 그런 일은 드물다.
-#
-# 남는 수동 작업은 GPT 지침 재붙여넣기 하나뿐이다 — ChatGPT Custom GPT의 Instructions는
-# API로 접근할 수 없어 어떤 방법으로도 자동화되지 않는다. 그것만 Issue로 알린다.
+# 왜 받아온 쪽을 실행하나: 로직을 저장소 안에 두면, 그 로직이 낡았을 때 **동기화 자체가
+# 실패해서 새 로직을 받지 못한다**(자기모순). 실제로 2026-08-03에 그 일이 났다 —
+# 워크플로를 얇게 만들며 로직을 scripts/로 내렸는데 설치 목록을 안 고쳐 첫 실행이 죽었다.
+# 받아온 것을 실행하면 동기화 로직은 언제나 최신이고, 설치는 이 파일 하나로 끝난다.
 #
 # 경계: 가져오는 것은 엔진(scripts · runner · presets · templates · 문서)뿐이다.
 # 내 기록과 설정(daily · materials · papers · mastery · STATUS · drills · concepts.json ·
-# topics.yaml · README)은 어느 경우에도 건드리지 않는다 — 목록은 sync_from_template.py에 있고,
-# 그 약속은 적용 **전에** 테스트가 검사한다.
+# topics.yaml · README)은 어느 경우에도 건드리지 않는다. 그 약속은 적용 **전에** 검사한다.
+#
+# 남는 수동 작업은 GPT 지침 재붙여넣기 하나뿐이다 — ChatGPT Custom GPT의 Instructions는
+# API로 접근할 수 없어 어떤 방법으로도 자동화되지 않는다. 그것만 Issue로 알린다.
 
 on:
   schedule:
@@ -44,8 +43,15 @@ jobs:
           # PAT이 있으면 그것으로 체크아웃해야 뒤의 푸시도 같은 토큰으로 나간다.
           token: ${{ secrets.TEMPLATE_SYNC_TOKEN || github.token }}
 
+      - name: 템플릿 내려받기
+        run: |
+          mkdir -p /tmp/tpl
+          curl -fsSL https://codeload.github.com/youjhun/Socralearner/tar.gz/refs/heads/main \
+            | tar xz -C /tmp/tpl --strip-components=1
+          echo "받은 파일 $(find /tmp/tpl -type f | wc -l)개"
+
       - name: 내 기록을 덮지 않는지 먼저 검사
-        run: python3 scripts/test_sync_from_template.py
+        run: python3 /tmp/tpl/scripts/test_sync_from_template.py
 
       - name: 동기화
         env:
@@ -54,10 +60,10 @@ jobs:
           SYNC_MODE: ${{ vars.TEMPLATE_SYNC_MODE || 'auto' }}
         run: |
           export SYNC_DATE="$(TZ=Asia/Seoul date +%F)"
-          python3 scripts/template_sync_ci.py
+          python3 /tmp/tpl/scripts/template_sync_ci.py --from /tmp/tpl
 
       - name: 실패를 조용히 넘기지 않는다
         if: failure()
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python3 scripts/ci_notify_failure.py "템플릿 업데이트"
+        run: python3 /tmp/tpl/scripts/ci_notify_failure.py "템플릿 업데이트" || true

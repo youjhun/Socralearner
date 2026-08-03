@@ -11,6 +11,12 @@
 남는 수동 작업은 **GPT 지침 재붙여넣기 하나**다. ChatGPT Custom GPT의 Instructions는
 API로 접근할 수 없어 어떤 방법으로도 자동화되지 않는다. 그래서 그것만 Issue로 알린다.
 
+부트스트랩:
+  이 스크립트는 **받아온 템플릿 쪽에서 실행된다**(`python3 /tmp/tpl/scripts/template_sync_ci.py
+  --from /tmp/tpl`). 그래야 쓰는 사람이 설치할 파일이 **워크플로 하나로** 줄고, 동기화
+  로직 자체가 항상 최신이 된다 — 로직이 낡아서 동기화가 실패하는 자기모순을 없앤다.
+  (2026-08-03 실측: 로직을 scripts/로 내리면서 설치 목록을 안 고쳐 첫 실행이 죽었다.)
+
 환경변수:
   GH_TOKEN        — 알림 Issue 생성용(그리고 PAT이면 워크플로 파일 푸시까지 가능)
   HAS_PAT         — "true"면 워크플로 파일도 밀 수 있다
@@ -117,12 +123,18 @@ def notify(summary, skipped_workflows, notes, needs_hand, mode):
 
 
 def main():
-    if not os.path.exists("scripts/sync_from_template.py"):
-        print("학습 저장소 루트에서 실행해야 한다", file=sys.stderr)
+    # 학습 저장소 루트인가 — 아무 데서나 돌면 엉뚱한 폴더를 덮는다.
+    if not os.path.isdir(".git"):
+        print("학습 저장소 루트에서 실행해야 한다 (.git 없음)", file=sys.stderr)
         return 2
 
-    tmp = tempfile.mkdtemp()
-    src = download_template(tmp)
+    # 워크플로가 이미 받아 둔 템플릿을 넘겨주면 다시 받지 않는다.
+    src = ""
+    for i, a in enumerate(sys.argv):
+        if a == "--from" and i + 1 < len(sys.argv):
+            src = sys.argv[i + 1]
+    if not src or not os.path.isdir(src):
+        src = download_template(tempfile.mkdtemp())
 
     added, changed = sync.plan(src, ".")
     workflows = [r for r in added + changed if sync.is_workflow(r)]
@@ -143,9 +155,11 @@ def main():
     notes, needs_hand = changelog_notes(src)
 
     if not gh.has_changes():
-        print("적용했으나 실제 변경 없음 — 알림만 보낸다")
-        if skipped:
-            notify(summary, skipped, notes, needs_hand, MODE)
+        # 바뀐 게 없으면 **알리지 않는다.** PAT 없이 쓰는 저장소는 워크플로 파일이 늘
+        # `skipped`에 남는데, 그때마다 알리면 아무것도 안 바뀐 주에도 Issue가 온다.
+        # 매주 오는 알림은 진짜 알림까지 무시하게 만든다 (2026-08-03 실측).
+        print("실제 변경 없음 — 알리지 않는다"
+              + (f" (워크플로 {len(skipped)}개는 계속 건너뜀)" if skipped else ""))
         return 0
 
     if MODE == "pr":
