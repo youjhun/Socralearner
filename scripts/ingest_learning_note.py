@@ -40,6 +40,25 @@ REQUIRED_HEADINGS = ["오늘 직접 학습한 지식", "취약 영역", "다음 
 
 STATUS_SECTION = "STATUS 갱신"
 MASTERY_SECTION = "이해도 승급"
+
+# `## 드릴 항목` — 회상 대상(단어 뜻·연호·값)은 개념 지도가 아니라 여기로 온다.
+# 2026-08-03: 토익 트랙에서 지식 그래프가 단어 단위로 생성된 것을 고치며 생긴 경로다.
+# 개념의 단위 정의는 runner/instructions.md의 "개념의 단위"에 있다. 여기는 그 저장 경로일 뿐이다.
+DRILLS_SECTION = "드릴 항목"
+DRILLS_PATH = "drills.md"
+DRILLS_HEADER = [
+    "---",
+    'title: "드릴 항목 (회상 대상)"',
+    "kind: drills",
+    "---",
+    "",
+    "# 드릴 항목 — 그래프에 넣지 않는 것",
+    "",
+    "> 단어 뜻·연호·공식의 값처럼 **답이 하나로 끝나고 위계에 참여하지 않는 것**을 모은다.",
+    "> 개념 그래프는 *설명 대상*만 담는다 — 여기 있는 것은 복습에는 쓰되 노드가 되지 않는다.",
+    "> 판정 기준은 `runner/instructions.md`의 「개념의 단위」를 본다.",
+    "",
+]
 BOT_SUFFIX = "[bot]"
 COMMAND_PREFIX = ("/기록", "/ingest", "/skip", "<!-- ingest")
 
@@ -204,6 +223,7 @@ def build_note(payload, today):
 
     body, status_patch = extract_status_patch(body)
     body, mastery = pop_section(body, MASTERY_SECTION)
+    body, drills = pop_section(body, DRILLS_SECTION)
     body, missing = ensure_headings(body)
 
     # 제목 규약: `[학습] YYYY-MM-DD <slug> — <한 줄 제목>` (뒷부분은 선택)
@@ -251,6 +271,7 @@ def build_note(payload, today):
         "content": "\n".join(fm) + "\n\n" + body.rstrip() + "\n",
         "status_patch": status_patch,
         "mastery": mastery,
+        "drills": drills,
         "track": user_fm.get("track", ""),
         "missing": missing,
     }
@@ -279,6 +300,44 @@ def target_path(date, slug, issue_number):
         if not os.path.exists(candidate):
             return candidate
     raise SystemExit(f"경로 충돌: {base}")
+
+
+def append_drills(section, date, path=DRILLS_PATH):
+    """`## 드릴 항목` → `drills.md`에 누적. 이미 있는 항목은 다시 적지 않는다.
+
+    mastery.md와 달리 조각+CI 통합을 쓰지 않는다 — 항목은 상태가 바뀌지 않는 목록이라
+    덧붙이기만 하면 되고, 러너가 아니라 이 스크립트만 이 파일을 만진다(충돌 없음).
+    """
+    items = []
+    for line in section.splitlines():
+        m = re.match(r"^\s*(?:[-*+]|\d+[.)])\s*(.+?)\s*$", line)
+        if not m:
+            continue
+        name = m.group(1).strip().strip("`")
+        if name and "<" not in name and name not in items:
+            items.append(name)
+    if not items:
+        return None
+
+    existing, lines = set(), []
+    if os.path.exists(path):
+        with open(path, encoding="utf-8") as f:
+            lines = f.read().rstrip().splitlines()
+        for line in lines:
+            m = re.match(r"^\s*[-*+]\s*(.+?)\s*$", line)
+            if m:
+                existing.add(m.group(1).split("  <!--")[0].strip())
+    else:
+        lines = list(DRILLS_HEADER)
+
+    fresh = [i for i in items if i not in existing]
+    if not fresh:
+        return None
+
+    lines += ["", f"## {date}"] + [f"- {i}" for i in fresh]
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines).rstrip() + "\n")
+    return len(fresh)
 
 
 def write_mastery_fragment(section, track, date, slug, note_path):
@@ -447,6 +506,7 @@ def main():
         f.write(note["content"])
     applied = apply_status_patch(note["status_patch"], args.today)
     promoted = write_mastery_fragment(note["mastery"], note["track"], note["date"], note["slug"], path)
+    drilled = append_drills(note["drills"], note["date"])
 
     lines_written = len(note["content"].splitlines())
     report = [
@@ -458,6 +518,8 @@ def main():
         report.append(f"- STATUS.md 갱신: {', '.join(applied)}")
     if promoted:
         report.append(f"- 이해도 승급 조각: `{promoted}`" if promoted.endswith(".md") else f"- {promoted}")
+    if drilled:
+        report.append(f"- 드릴 항목 {drilled}개 → `{DRILLS_PATH}` (그래프에는 넣지 않는다 — 회상 대상이다)")
     if note["missing"]:
         report.append(f"- ⚠️ 정규 헤딩 자동 보정: {', '.join(note['missing'])} — 다음 세션에서 실제로 채울 것")
     report += [
