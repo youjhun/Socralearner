@@ -56,6 +56,30 @@
 > 이 약속은 `scripts/test_sync_from_template.py`가 매 실행마다 검사합니다.
 > 파일을 **지우지도** 않습니다 — 내가 추가한 스크립트는 그대로 남습니다.
 
+### 잘 되고 있는지 확인하기
+
+설치했으면 **Actions → template-sync → Run workflow** 를 한 번 눌러 보세요. 성공하면:
+
+1. 커밋 목록에 `템플릿 업데이트 — …` 커밋이 생깁니다
+2. Issues에 `[템플릿] … 업데이트` 가 하나 열립니다 (무엇이 바뀌었는지 적혀 있음)
+3. `daily/` · `mastery.md` · `STATUS.md` · `topics.yaml` 은 **그대로**입니다
+
+여러 사람 것을 한 번에 보려면 (템플릿 저장소에서):
+
+```bash
+python3 scripts/check_fleet.py friend1/my-learning friend2/study
+# 또는 목록 파일로
+python3 scripts/check_fleet.py --file fleet.txt
+```
+
+```
+  friend1/my-learning  🟢 최신  (마지막 동기화 2026-08-03)
+  friend2/study        🟡 뒤처짐 2개 — 설치는 됐다. Run workflow 한 번이면 따라온다
+  friend3/toeic        🔴 자동 동기화 미설치 — MIGRATION.md의 파일 3개를 넣어 줘야 한다
+```
+
+읽기만 합니다. 남의 저장소를 고치지 않습니다.
+
 ### 알아 둘 것 두 가지
 
 **① 결국 손으로 하는 건 GPT 지침 하나뿐입니다.**
