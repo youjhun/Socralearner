@@ -117,6 +117,22 @@ for rel in ("daily/x.md", "daily", "topics.yaml", "mastery/a.md", "materials/dee
 for rel in ("scripts/x.py", "runner/instructions.md", "presets/toeic/README.md"):
     check(f"{rel} → 보호 아님", not sync.is_protected(rel))
 
+print("\n⑧ 워크플로 파일을 따로 셀 수 있다 (기본 토큰으로는 못 밀기 때문)")
+check(".github/workflows/x.yml → 워크플로", sync.is_workflow(".github/workflows/x.yml"))
+check("scripts/x.py → 워크플로 아님", not sync.is_workflow("scripts/x.py"))
+
+# --skip-workflows 로 돌리면 워크플로만 빼고 나머지는 그대로 간다
+src2 = os.path.join(tmp, "template2")
+dst2 = os.path.join(tmp, "mine2")
+write(src2, "scripts/a.py", "새것")
+write(src2, ".github/workflows/w.yml", "새 워크플로")
+write(dst2, "scripts/a.py", "옛것")
+write(dst2, ".github/workflows/w.yml", "옛 워크플로")
+added3, changed3 = sync.plan(src2, dst2)
+sync.apply(src2, dst2, [r for r in changed3 if not sync.is_workflow(r)])
+check("워크플로를 건너뛰면 스크립트만 갱신된다", read(dst2, "scripts/a.py") == "새것")
+check("워크플로는 그대로 남는다", read(dst2, ".github/workflows/w.yml") == "옛 워크플로")
+
 shutil.rmtree(tmp)
 
 print()
