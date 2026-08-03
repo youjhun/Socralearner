@@ -25,9 +25,17 @@
 **파일을 지우지 않는다.** 템플릿에서 사라진 파일도 내 저장소에는 남긴다 — 내가 추가한
 스크립트를 동기화가 지워 버리는 사고를 막는 쪽이, 낡은 파일 하나가 남는 것보다 낫다.
 
+## 워크플로 파일은 따로 센다
+
+GitHub Actions의 기본 토큰(`GITHUB_TOKEN`)은 **`.github/workflows/` 아래를 수정할 수 없다**
+— 푸시가 거부된다. 워크플로도 동기화 대상이라, 이걸 모르고 한 덩어리로 밀면 워크플로가
+바뀌는 순간(바로 이번 같은 때) 동기화 전체가 실패한다. 그래서 워크플로 변경은 따로 세어
+호출부가 다르게 처리할 수 있게 한다(`--skip-workflows`).
+
 실행:
     python3 scripts/sync_from_template.py --from <추출된_템플릿_경로>
-    python3 scripts/sync_from_template.py --from <경로> --dry-run   # 목록만
+    python3 scripts/sync_from_template.py --from <경로> --dry-run       # 목록만
+    python3 scripts/sync_from_template.py --from <경로> --skip-workflows # 워크플로 빼고
 """
 import argparse
 import filecmp
@@ -63,6 +71,13 @@ NEVER = (
     "topics.yaml",
     "README.md",
 )
+
+
+WORKFLOW_DIR = ".github/workflows/"
+
+
+def is_workflow(rel):
+    return rel.replace(os.sep, "/").startswith(WORKFLOW_DIR)
 
 
 def is_protected(rel):
@@ -121,6 +136,8 @@ def main():
     ap.add_argument("--from", dest="src", required=True, help="추출된 템플릿 저장소 경로")
     ap.add_argument("--to", dest="dst", default=".", help="내 저장소 경로 (기본: 현재 위치)")
     ap.add_argument("--dry-run", action="store_true", help="바꾸지 않고 목록만 출력")
+    ap.add_argument("--skip-workflows", action="store_true",
+                    help="`.github/workflows/`는 건드리지 않는다 (기본 토큰으로는 푸시할 수 없다)")
     args = ap.parse_args()
 
     if not os.path.isdir(args.src):
@@ -129,31 +146,48 @@ def main():
 
     added, changed = plan(args.src, args.dst)
 
-    if not added and not changed:
+    # 워크플로는 따로 센다 — 기본 토큰으로는 푸시할 수 없어서 호출부가 달리 다뤄야 한다.
+    wf = [r for r in added + changed if is_workflow(r)]
+    if args.skip_workflows:
+        added = [r for r in added if not is_workflow(r)]
+        changed = [r for r in changed if not is_workflow(r)]
+
+    if not added and not changed and not wf:
         print("이미 최신이다 — 가져올 변경 없음")
-        if os.environ.get("GITHUB_OUTPUT"):
-            with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as f:
-                f.write("changed=false\n")
+        _emit(changed=False, summary="", workflows=[])
         return 0
 
     for rel in added:
         print(f"  + {rel}")
     for rel in changed:
         print(f"  ~ {rel}")
-    print(f"\n새 파일 {len(added)}개 · 갱신 {len(changed)}개")
+    summary = f"새 파일 {len(added)}개 · 갱신 {len(changed)}개"
+    print(f"\n{summary}")
     print("내 기록(daily · mastery · STATUS · topics.yaml · drills)은 건드리지 않았다.")
+    if args.skip_workflows and wf:
+        print(f"\n⚠️  워크플로 {len(wf)}개는 건너뛰었다 (기본 토큰으로는 수정할 수 없다):")
+        for r in wf:
+            print(f"     {r}")
 
     if args.dry_run:
         print("\n--dry-run — 실제로 바꾸지 않았다.")
         return 0
 
     apply(args.src, args.dst, added + changed)
-
-    if os.environ.get("GITHUB_OUTPUT"):
-        with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as f:
-            f.write("changed=true\n")
-            f.write(f"summary=새 파일 {len(added)}개 · 갱신 {len(changed)}개\n")
+    _emit(changed=bool(added or changed), summary=summary, workflows=wf if args.skip_workflows else [])
     return 0
+
+
+def _emit(changed, summary, workflows):
+    """워크플로가 다음 단계를 정할 수 있게 결과를 넘긴다."""
+    out = os.environ.get("GITHUB_OUTPUT")
+    if not out:
+        return
+    with open(out, "a", encoding="utf-8") as f:
+        f.write(f"changed={'true' if changed else 'false'}\n")
+        f.write(f"summary={summary}\n")
+        f.write(f"workflow_count={len(workflows)}\n")
+        f.write("workflow_files=" + " ".join(workflows) + "\n")
 
 
 if __name__ == "__main__":

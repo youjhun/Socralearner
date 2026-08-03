@@ -38,21 +38,15 @@
 
 지금까지는 템플릿이 고쳐질 때마다 이 문서를 보고 손으로 파일을 복사해야 했습니다.
 **이제 안 그래도 됩니다.** 아래 파일 3개를 한 번만 가져오면, 다음부터는 템플릿이 바뀔 때마다
-내 저장소에 **PR이 자동으로 열립니다**. 보고 머지만 누르면 됩니다.
+내 저장소에 **자동으로 적용되고 Issue로 알려 줍니다.** 머지도 안 눌러도 됩니다.
 
 | 가져올 파일 | 무엇 |
 |---|---|
-| `.github/workflows/template-sync.yml` | 매주 월요일에 템플릿을 확인해 PR을 연다 |
+| `.github/workflows/template-sync.yml` | 매주 월요일에 템플릿을 확인해 적용한다 |
 | `scripts/sync_from_template.py` | 엔진만 가져오고 내 기록은 건드리지 않는다 |
-| `scripts/test_sync_from_template.py` | 그 약속을 CI가 매번 검사한다 |
+| `scripts/test_sync_from_template.py` | 그 약속을 적용 **전에** 매번 검사한다 |
 
 가져오는 법은 아래 [1단계](#1단계--바뀐-파일-가져오기-5분)와 같습니다(웹 복사 또는 git).
-
-그다음 **한 번만** 설정을 켜 주세요:
-**Settings → Actions → General → Workflow permissions →
-"Allow GitHub Actions to create and approve pull requests"** 체크.
-(이게 꺼져 있으면 PR을 못 만들고, 워크플로가 실패 Issue로 알려 줍니다.)
-
 바로 확인하려면 **Actions → template-sync → Run workflow**.
 
 > 무엇을 가져오나: `scripts/` · `runner/` · `presets/` · `templates/` ·
@@ -60,6 +54,22 @@
 > **절대 안 가져오는 것**: `daily/` · `materials/` · `papers/` · `mastery.md` ·
 > `mastery/` · `STATUS.md` · `drills.md` · `concepts.json` · `topics.yaml` · `README.md`.
 > 이 약속은 `scripts/test_sync_from_template.py`가 매 실행마다 검사합니다.
+> 파일을 **지우지도** 않습니다 — 내가 추가한 스크립트는 그대로 남습니다.
+
+### 알아 둘 것 두 가지
+
+**① 워크플로 파일은 자동이 안 됩니다 (기본 설정에서는).**
+GitHub Actions의 기본 토큰은 `.github/workflows/` 를 수정할 수 없습니다. 그래서 워크플로가
+바뀌면 **건너뛰고 Issue로 "이 파일들을 복사하세요"** 라고 알려 줍니다(링크 포함).
+이것까지 자동으로 하려면 — `workflow` 스코프를 가진 토큰을 만들어
+**Settings → Secrets and variables → Actions → New repository secret** 에
+`TEMPLATE_SYNC_TOKEN` 이름으로 넣어 두면 됩니다. 선택입니다.
+
+**② 자동 적용이 싫으면 PR로 받을 수 있습니다.**
+**Settings → Secrets and variables → Actions → Variables** 에서
+`TEMPLATE_SYNC_MODE` = `pr` 로 두면 적용 대신 PR을 엽니다. 이 경우
+**Settings → Actions → General → "Allow GitHub Actions to create and approve pull requests"**
+를 켜야 합니다.
 
 ---
 
