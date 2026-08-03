@@ -58,12 +58,16 @@
 
 ### 알아 둘 것 두 가지
 
-**① 워크플로 파일은 자동이 안 됩니다 (기본 설정에서는).**
-GitHub Actions의 기본 토큰은 `.github/workflows/` 를 수정할 수 없습니다. 그래서 워크플로가
-바뀌면 **건너뛰고 Issue로 "이 파일들을 복사하세요"** 라고 알려 줍니다(링크 포함).
-이것까지 자동으로 하려면 — `workflow` 스코프를 가진 토큰을 만들어
-**Settings → Secrets and variables → Actions → New repository secret** 에
-`TEMPLATE_SYNC_TOKEN` 이름으로 넣어 두면 됩니다. 선택입니다.
+**① 결국 손으로 하는 건 GPT 지침 하나뿐입니다.**
+스크립트·러너 지침 파일·프리셋·문서는 전부 자동으로 적용됩니다. ChatGPT Custom GPT의
+Instructions만 API로 바꿀 수 없어서, 그게 바뀌면 알림 Issue 맨 위에
+**"⚠️ 이것만 직접 해 주세요 — GPT 지침"** 으로 뜨고 붙여넣을 위치까지 링크로 줍니다.
+
+워크플로 파일(`.github/workflows/`)도 기본 토큰으로는 못 바꾸지만, 이제 그 파일들은
+**"체크아웃하고 스크립트를 부른다"만 있는 껍데기**라 거의 바뀌지 않습니다(로직은 `scripts/`에
+있고 그건 자동입니다). 혹시 바뀌면 Issue가 링크와 함께 알려 줍니다. 이것까지 자동으로 하려면
+`workflow` 스코프 토큰을 **Settings → Secrets and variables → Actions** 에
+`TEMPLATE_SYNC_TOKEN` 으로 넣어 두면 됩니다. 선택입니다.
 
 **② 자동 적용이 싫으면 PR로 받을 수 있습니다.**
 **Settings → Secrets and variables → Actions → Variables** 에서
