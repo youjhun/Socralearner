@@ -1,10 +1,13 @@
 name: paper-scan
 
-# 논문 스케줄링 — `topics.yaml`에 적어 둔 연구 주제로 **매주 새 논문**을 찾아
-# `papers/inbox.md`에 모으고, 새 게 있으면 Issue로 알려준다.
+# 논문 스케줄링 — `topics.yaml`의 주제로 매주 새 논문을 찾아 `papers/`에 모은다.
+#
+# 이 파일은 일부러 **얇다.** 로직은 `scripts/paper_scan_ci.py`와 `scripts/scan_papers.py`에
+# 있다. Actions의 기본 토큰은 `.github/workflows/` 를 수정할 수 없어 워크플로 파일은
+# 자동 배포되지 않는다 — 그래서 고칠 가능성이 있는 것은 전부 scripts/에 둔다.
 #
 # 서버가 없다. 각자 repo의 Actions가 공개 API(OpenAlex — 키 불필요)를 조회한다.
-# 비용 0 · LLM 토큰 0 · 계정 0. 학습 세션에서 러너가 이 인박스를 읽어 학습에 엮는다.
+# 비용 0 · LLM 토큰 0 · 계정 0.
 #
 # 경계: 이 워크플로가 쓰는 경로는 `papers/**` 뿐이다.
 
@@ -31,59 +34,16 @@ jobs:
       - name: 선별 로직 자체 점검 (네트워크 없음)
         run: python3 scripts/test_scan_papers.py
 
-      - name: 새 논문 수집
-        id: scan
+      - name: 수집 · 커밋 · 알림
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           python3 -c "import yaml" 2>/dev/null || pip install --quiet pyyaml
-          python3 scripts/scan_papers.py
-
-      - name: 커밋
-        id: commit
-        run: |
-          if [ -z "$(git status --porcelain papers)" ]; then
-            echo "변경 없음"; echo "changed=false" >> "$GITHUB_OUTPUT"; exit 0
-          fi
-          git config user.name  "socralearner[bot]"
-          git config user.email "noreply@github.com"
-          git add papers
-          git commit -m "papers: 주간 논문 수집 ($(date -u +%F))"
-          for i in 1 2 3 4; do
-            git pull --rebase origin "${GITHUB_REF_NAME}" && git push origin "HEAD:${GITHUB_REF_NAME}" && break
-            sleep $((2 ** i))
-          done
-          echo "changed=true" >> "$GITHUB_OUTPUT"
-
-      - name: 새 논문이 있으면 Issue로 알림
-        if: steps.commit.outputs.changed == 'true' && steps.scan.outputs.new_count != '0'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require('fs');
-            const n = '${{ steps.scan.outputs.new_count }}';
-            const body = fs.existsSync('papers/inbox.md')
-              ? fs.readFileSync('papers/inbox.md', 'utf8').replace(/^---[\s\S]*?---\n/, '')
-              : '';
-            const today = new Date().toISOString().slice(0, 10);
-            await github.rest.issues.create({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              title: `[논문] ${today} 새 논문 ${n}편`,
-              body: body.slice(0, 60000) +
-                '\n\n---\n다 읽지 마세요. 제목·초록만 훑고 **한 편만 골라** 세션에서 깊게 보면 됩니다.\n' +
-                '학습 러너에게: *"이번 주 새 논문 같이 보자"*',
-            });
+          export SYNC_DATE="$(TZ=Asia/Seoul date +%F)"
+          python3 scripts/paper_scan_ci.py
 
       - name: 실패를 조용히 넘기지 않는다
         if: failure()
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const url = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
-            await github.rest.issues.create({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              title: `[논문] 수집 실패 — ${new Date().toISOString().slice(0, 10)}`,
-              body: `논문 수집이 실패했습니다 — [실행 로그](${url})\n\n` +
-                    `흔한 원인: \`topics.yaml\` 문법 오류, 외부 API 일시 장애.\n` +
-                    `고친 뒤 Actions 탭에서 **paper-scan → Run workflow**로 다시 돌리면 됩니다.`,
-            });
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/ci_notify_failure.py "논문 수집"
