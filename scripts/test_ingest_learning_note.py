@@ -319,6 +319,57 @@ remove: true
               "primary_topic.field.id:fields/22" in scan_papers._filter_of({"field": "fields/22"}))
         check("고정이 없으면 필터가 비어 있다", scan_papers._filter_of({"query": "x"}) == "")
 
+    # ⑧ 학습 트랙 — 과목이 `daily/` 한 폴더에 섞이지 않게 (2026-08-04)
+    print("\n학습 트랙")
+    TRACK_BODY = """## 트랙
+
+### electronics | 전자공학
+mode: 진도
+goal: 회로 해석을 스스로 설명하기
+
+### old | 안 쓰는 트랙
+remove: true
+"""
+    tracks = ingest.build_tracks(
+        {"number": 60, "title": "[설정] tracks — 과목 분리", "body": TRACK_BODY, "comments": []})
+    check("트랙 id·라벨이 갈린다",
+          tracks[0]["id"] == "electronics" and tracks[0]["label"] == "전자공학", str(tracks[0]))
+    check("모드·목표가 잡힌다", tracks[0].get("mode") == "진도", str(tracks[0]))
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "tracks.yaml")
+        ingest.merge_tracks(tracks, path=path)
+        loaded = ingest.load_tracks(path)
+        check("쓴 것을 그대로 다시 읽는다", [t["id"] for t in loaded] == ["electronics"], str(loaded))
+
+        # 러너는 사람이 말한 이름(한글 라벨)을 그대로 적기 쉽다 — id로 맞춰 준다.
+        check("라벨로도 트랙을 찾는다", ingest.resolve_track("전자공학", loaded) == "electronics")
+        check("id로도 찾는다", ingest.resolve_track("electronics", loaded) == "electronics")
+        # 없는 트랙을 만들어 내면 유령 폴더가 생겨 다음 세션부터 기록이 갈라진다.
+        check("없는 이름은 만들지 않는다", ingest.resolve_track("영어", loaded) is None)
+
+        # 트랙이 있으면 그 폴더로, 없으면 예전처럼 루트로.
+        cwd = os.getcwd()
+        try:
+            os.chdir(tmp)
+            os.makedirs("daily", exist_ok=True)
+            p1 = ingest.target_path("2026-08-04", "rc", 1, "electronics")
+            check("트랙 세션은 daily/<track>/으로 간다",
+                  p1 == os.path.join("daily", "electronics", "2026-08-04-rc.md"), p1)
+            p2 = ingest.target_path("2026-08-04", "rc", 2, None)
+            check("트랙이 없으면 예전처럼 daily/ 루트",
+                  p2 == os.path.join("daily", "2026-08-04-rc.md"), p2)
+
+            # 트랙 도입 전 노트를 다시 수집해도 파일이 둘로 갈라지면 안 된다.
+            os.makedirs(os.path.join("daily", "electronics"), exist_ok=True)
+            old = os.path.join("daily", "2026-08-01-old.md")
+            with open(old, "w", encoding="utf-8") as f:
+                f.write("---\nsource_issue: 7\n---\n")
+            check("옛 노트를 다시 수집하면 같은 파일에 덮어쓴다",
+                  ingest.target_path("2026-08-04", "old", 7, "electronics") == old)
+        finally:
+            os.chdir(cwd)
+
     print()
     if FAILED:
         print(f"❌ 실패 {len(FAILED)}: " + ", ".join(FAILED))

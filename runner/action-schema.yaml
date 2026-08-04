@@ -185,6 +185,40 @@ paths:
             text/plain:
               schema: { type: string }
 
+  /repos/{owner}/{repo}/contents/daily/{track}/{file}:
+    get:
+      operationId: readTrackDaily
+      summary: 트랙(과목) 폴더의 지난 세션 노트 (daily/<track>/YYYY-MM-DD-<slug>.md)
+      description: >-
+        `tracks.yaml`에 트랙이 있으면 세션 노트는 `daily/<track>/`에 쌓인다.
+        트랙 없이 쓰던 옛 노트는 `daily/` 바로 아래에 있으므로 readDailyFile 로 읽는다.
+      parameters:
+        - { name: owner, in: path, required: true, schema: { type: string } }
+        - { name: repo,  in: path, required: true, schema: { type: string } }
+        - name: track
+          in: path
+          required: true
+          description: "tracks.yaml의 id. 예: electronics"
+          schema: { type: string }
+        - name: file
+          in: path
+          required: true
+          description: "예: 2026-08-04-rc-circuit.md"
+          schema: { type: string }
+        - name: Accept
+          in: header
+          required: true
+          schema:
+            type: string
+            enum: ["application/vnd.github.raw"]
+            default: "application/vnd.github.raw"
+      responses:
+        "200":
+          description: 파일 평문
+          content:
+            text/plain:
+              schema: { type: string }
+
   /repos/{owner}/{repo}/contents/materials/{file}:
     get:
       operationId: readMaterialFile

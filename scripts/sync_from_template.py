@@ -17,7 +17,7 @@
 
 **절대 안 가져온다 — 내 기록과 내 설정:**
   daily/ · materials/ · papers/ · mastery.md · mastery/ · STATUS.md · drills.md ·
-  concepts.json · topics.yaml · README.md
+  concepts.json · topics.yaml · tracks.yaml · README.md
 
 `topics.yaml`이 제외인 이유: 내가 고른 연구 주제가 거기 있다. 덮어쓰면 주제가 날아간다.
 `README.md`가 제외인 이유: 자기 저장소 첫 화면은 각자 고쳐 쓴다.
@@ -69,6 +69,7 @@ NEVER = (
     "drills.md",
     "concepts.json",
     "topics.yaml",
+    "tracks.yaml",  # 내가 나눈 학습 서랍 — 덮어쓰면 세션 저장 위치가 흔들린다
     "subjects.yaml",  # 분야 목록 — 학습자의 것이다(topics.yaml과 같은 성격)
     "README.md",
     "pilot/",  # 파일럿 롤업 산출물 — 내 저장소에서 계산된 내 수치다(pilot_rollup.py)
