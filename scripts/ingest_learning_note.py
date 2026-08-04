@@ -214,7 +214,7 @@ def build_note(payload, today):
     # 본문 맨 앞의 지시행(slug:, runner:)도 frontmatter처럼 취급하고 제거한다.
     directives = {}
     lines = body.splitlines()
-    while lines and re.match(r"^(slug|runner|course|week|exam_target|tags|track)\s*:\s*\S", lines[0].strip()):
+    while lines and re.match(r"^(slug|runner|course|week|exam_target|tags|track|artifact)\s*:\s*\S", lines[0].strip()):
         key, value = lines[0].split(":", 1)
         directives[key.strip()] = value.strip()
         lines.pop(0)
@@ -256,7 +256,10 @@ def build_note(payload, today):
         f'runner: {user_fm.get("runner", "gpt")}',
         f"source_issue: {payload.get('number')}",
     ]
-    for key in ("course", "week", "exam_target"):
+    # `artifact` — 세션 밖에 남은 산출물(코드·발표자료·재현 노트북)의 링크.
+    # 파일럿 지표 `time_to_first_artifact`의 유일한 원자료라, 본문에 묻히지 않게
+    # frontmatter로 올린다(`pilot_rollup.py`가 여기서 센다).
+    for key in ("course", "week", "exam_target", "artifact"):
         if user_fm.get(key):
             fm.append(f"{key}: {user_fm[key]}")
     fm.append("---")
