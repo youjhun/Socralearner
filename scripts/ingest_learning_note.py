@@ -31,15 +31,56 @@ import sys
 
 DAILY_DIR = "daily"
 MATERIALS_DIR = "materials"
+PAPERS_DIR = "papers"
 STATUS_PATH = "STATUS.md"
 LEARNING_ROOT = "."
 
 # 대시보드(dashboard/lib/data/learning.ts)와 음성 로더가 키로 삼는 정규 헤딩.
 # 없으면 "기록됐는데 안 읽히는" 조용한 실패가 되므로, 막지 않고 채워 넣고 경고한다.
-REQUIRED_HEADINGS = ["오늘 직접 학습한 지식", "취약 영역", "다음 복습 질문"]
+# 2026-08-04: `현재 이해 수준`·`미해결 질문`을 추가했다. 유지훈 개인 러너는 이미 둘을
+# 정규 헤딩으로 요구하는데 템플릿만 빠져 있어, 배포판 사용자의 노트에는 "지금 어디까지
+# 이해했나"와 "다음 세션의 시작점"이 남지 않았다. 둘은 다음 세션이 이어붙는 자리라
+# 빠지면 매 세션이 처음부터 시작된다.
+REQUIRED_HEADINGS = [
+    "오늘 직접 학습한 지식",
+    "취약 영역",
+    "다음 복습 질문",
+    "현재 이해 수준",
+    "미해결 질문",
+]
 
 STATUS_SECTION = "STATUS 갱신"
 MASTERY_SECTION = "이해도 승급"
+
+# ─────────────────────── STATUS 승격 (노트 → STATUS.md) ───────────────────────
+#
+# 2026-08-04: STATUS.md의 쓰기 계약은 러너에게 넷을 요구하는데(오늘 목표·약점 top5·
+# 복습 top5·최근 궤적), `runner/instructions.md`의 노트 서식에는 `### 오늘 할 것`
+# 하나뿐이었다. 나머지 셋은 러너가 쓰지 않으니 패치할 내용이 없었고, STATUS.md는
+# 템플릿 자리표시자 그대로 남았다 — 앱에서 "지금 약한 것: 아직 없습니다"가 계속 뜬
+# 원인이다(유지훈 2026-08-04 보고).
+#
+# 고치는 방향은 서식에 절을 더 요구하는 것이 **아니다**. 약점과 복습 질문은 이미
+# `## 취약 영역` · `## 다음 복습 질문`으로 노트에 들어오고 CI가 필수 헤딩으로 검사까지
+# 한다. 같은 내용을 한 노트에 두 번 쓰게 하면 두 곳이 어긋나고, 한 곳을 빠뜨리면 이
+# 버그가 그대로 재발한다.
+#
+# 그래서 이 repo가 이미 택한 원칙을 따른다 — **큰 쓰기는 모델이 아니라 CI가
+# 결정론적으로**(learning-note-ingest.yml 헤더의 설계 근거). 러너는 자기만 아는 것
+# (`오늘 할 것`)만 쓰고, 나머지는 여기서 노트로부터 유도한다.
+#
+# 러너가 직접 쓴 절이 있으면 **그쪽이 이긴다** — 유도는 빈 자리를 메우는 것이지
+# 사람이 쓴 것을 덮는 것이 아니다.
+STATUS_DERIVED = [
+    # (노트 본문의 절, STATUS.md의 절, 최대 줄 수)
+    ("취약 영역", "지금 약한 것", 5),
+    ("다음 복습 질문", "다음 복습 질문", 5),
+]
+
+TRAJECTORY_SECTION = "최근 궤적"
+# 최근 궤적은 교체가 아니라 누적이다. 무한정 쌓으면 STATUS.md가 커져 러너가 매 세션
+# 통째로 읽는 비용이 오르므로(이 파일의 존재 이유가 "작게 유지"다) 최근 것만 남긴다.
+TRAJECTORY_KEEP = 7
 
 # `## 드릴 항목` — 회상 대상(단어 뜻·연호·값)은 개념 지도가 아니라 여기로 온다.
 # 2026-08-03: 토익 트랙에서 지식 그래프가 단어 단위로 생성된 것을 고치며 생긴 경로다.
@@ -59,6 +100,27 @@ DRILLS_HEADER = [
     "> 판정 기준은 `runner/instructions.md`의 「개념의 단위」를 본다.",
     "",
 ]
+# ─────────────────────────── 논문 세션 (`[논문]`) ───────────────────────────
+#
+# 2026-08-04: 템플릿 CI의 게이트가 `[학습]`·`[자료]`만 통과시켜, 논문 러너가 만든
+# `[논문]` Issue는 **워크플로가 아예 돌지 않고 조용히 사라졌다.** 유지훈 본인은 Hudson에
+# 별도 경로가 있어 문제를 못 겪지만, 이 템플릿만 쓰는 사용자에게는 논문 트랙 전체가
+# 기록되지 않는 상태였다. 배포판이 곧 제품이므로 여기서 받는다.
+#
+# 논문은 세션이 여러 번에 걸쳐 한 편을 관통한다(Methods → Results → …). 그래서 학습
+# 노트처럼 날짜 하나에 접지 않고 **논문별 폴더**에 세션을 쌓는다.
+#
+#   papers/<slug>/sessions/YYYY-MM-DD-<섹션>.md   세션 원문 — 실패하지 않는 경로
+#   papers/<slug>/paper.md                        정제본 — 검증된 이해만, 절 단위 교체
+#   papers/<slug>/annotations.md                  인용 + 코멘트, 쌓인다
+#   papers/READING_STATUS.md                      지금 읽는 논문·어디까지·다음 세션
+PAPER_SECTIONS = {
+    "정제본 갱신": "paper.md",
+    "주석": "annotations.md",
+}
+READING_STATUS_SECTION = "READING_STATUS 갱신"
+READING_STATUS_PATH = os.path.join(PAPERS_DIR, "READING_STATUS.md")
+
 BOT_SUFFIX = "[bot]"
 COMMAND_PREFIX = ("/기록", "/ingest", "/skip", "<!-- ingest")
 
@@ -140,9 +202,9 @@ def pop_section(body, name):
     return "\n".join(lines[:start] + lines[end:]).strip(), section
 
 
-def extract_status_patch(body):
-    """`## STATUS 갱신` 절을 본문에서 떼어내 {섹션: 내용} 으로 돌려준다."""
-    body, section = pop_section(body, STATUS_SECTION)
+def extract_status_patch(body, name=None):
+    """`## STATUS 갱신`(또는 지정한 절)을 본문에서 떼어내 {섹션: 내용} 으로 돌려준다."""
+    body, section = pop_section(body, name or STATUS_SECTION)
     if not section:
         return body, {}
 
@@ -155,6 +217,96 @@ def extract_status_patch(body):
             patch[current].append(line)
     patch = {k: "\n".join(v).strip() for k, v in patch.items() if "\n".join(v).strip()}
     return body, patch
+
+
+def read_section(body, name):
+    """`## <name>` 절의 내용을 **떼어내지 않고** 읽는다(pop_section의 읽기 전용판)."""
+    lines = body.splitlines()
+    start = None
+    for i, line in enumerate(lines):
+        if line.startswith("## ") and name in line:
+            start = i
+            break
+    if start is None:
+        return ""
+    end = len(lines)
+    for i in range(start + 1, len(lines)):
+        if lines[i].startswith("## "):
+            end = i
+            break
+    return "\n".join(lines[start + 1:end]).strip()
+
+
+def _is_empty_marker(text):
+    """수집기가 자동 보정한 자리표시자는 내용이 아니다 — 승격하면 거짓이 쌓인다."""
+    stripped = text.strip().lstrip("-*0123456789. ").strip()
+    return not stripped or stripped in {"(이번 세션 기록 없음)", "(없음)", "없음"}
+
+
+def derive_status_patch(body, patch):
+    """러너가 안 쓴 STATUS 절을 노트 본문에서 유도한다(러너가 쓴 것이 우선)."""
+    patch = dict(patch)
+    for source, target, limit in STATUS_DERIVED:
+        if any(normalize_heading(target) in normalize_heading(k) for k in patch):
+            continue  # 러너가 직접 썼다 — 건드리지 않는다
+        section = read_section(body, source)
+        if not section:
+            continue
+        items = [ln.strip() for ln in section.splitlines() if ln.strip()]
+        items = [ln for ln in items if not ln.lstrip().startswith(">")]
+        items = [ln for ln in items if not _is_empty_marker(ln)]
+        if not items:
+            continue
+        numbered = []
+        for i, item in enumerate(items[:limit], 1):
+            numbered.append(f"{i}. {item.lstrip('-*0123456789. ').strip()}")
+        patch[target] = "\n".join(numbered)
+    return patch
+
+
+def append_trajectory(display, date, path, today):
+    """`## 최근 궤적`에 세션 한 줄을 누적한다 — 교체가 아니라 append."""
+    if not os.path.exists(STATUS_PATH):
+        return False
+    with open(STATUS_PATH, encoding="utf-8") as f:
+        lines = f.read().splitlines()
+
+    idx = None
+    for i, line in enumerate(lines):
+        if line.startswith("## ") and normalize_heading(TRAJECTORY_SECTION) in normalize_heading(line[3:]):
+            idx = i
+            break
+    if idx is None:
+        return False
+
+    end = len(lines)
+    for i in range(idx + 1, len(lines)):
+        if lines[i].startswith("## "):
+            end = i
+            break
+
+    keep, entries = [], []
+    for line in lines[idx + 1:end]:
+        if line.lstrip().startswith(">"):
+            keep.append(line)
+        elif line.strip().startswith("-"):
+            entries.append(line.strip())
+
+    # 첫 세션 전의 자리표시자는 실제 기록이 들어오면 사라져야 한다.
+    entries = [e for e in entries if "아직 없음" not in e]
+    entry = f"- {date} · {display} → [{path}]({path})"
+    entries = [e for e in entries if not e.startswith(f"- {date} · {display} ")]
+    entries.append(entry)
+    entries = entries[-TRAJECTORY_KEEP:]
+
+    lines[idx + 1:end] = keep + [""] + entries + [""]
+    for i, line in enumerate(lines[:20]):
+        if line.startswith("updated:"):
+            lines[i] = f"updated: {today}"
+            break
+    with open(STATUS_PATH, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines).rstrip() + "\n")
+    return True
 
 
 def ensure_headings(body):
@@ -225,6 +377,8 @@ def build_note(payload, today):
     body, mastery = pop_section(body, MASTERY_SECTION)
     body, drills = pop_section(body, DRILLS_SECTION)
     body, missing = ensure_headings(body)
+    # 러너가 안 쓴 STATUS 절은 노트 본문에서 유도한다(모델에게 같은 말을 두 번 시키지 않는다).
+    status_patch = derive_status_patch(body, status_patch)
 
     # 제목 규약: `[학습] YYYY-MM-DD <slug> — <한 줄 제목>` (뒷부분은 선택)
     title = payload.get("title") or ""
@@ -276,6 +430,7 @@ def build_note(payload, today):
         "mastery": mastery,
         "drills": drills,
         "track": user_fm.get("track", ""),
+        "display": display,
         "missing": missing,
     }
 
@@ -397,11 +552,14 @@ def write_mastery_fragment(section, track, date, slug, note_path):
     return path
 
 
-def apply_status_patch(patch, today):
-    """STATUS.md의 `## ` 절 본문을 통째로 교체한다 — 안내용 인용(>)줄은 보존."""
-    if not patch or not os.path.exists(STATUS_PATH):
+def apply_section_patch(patch, today, path=STATUS_PATH):
+    """`## ` 절 본문을 통째로 교체한다 — 안내용 인용(>)줄은 보존.
+
+    STATUS.md 전용이었으나 논문 정제본·READING_STATUS도 동작이 같아 경로를 받는다.
+    """
+    if not patch or not os.path.exists(path):
         return []
-    with open(STATUS_PATH, encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         lines = f.read().splitlines()
 
     applied = []
@@ -438,9 +596,199 @@ def apply_status_patch(patch, today):
             if line.startswith("updated:"):
                 lines[i] = f"updated: {today}"
                 break
-        with open(STATUS_PATH, "w", encoding="utf-8") as f:
+        with open(path, "w", encoding="utf-8") as f:
             f.write("\n".join(lines).rstrip() + "\n")
     return applied
+
+
+# 이름을 바꾸기 전 호출부와의 호환 — STATUS 경로 기본값 그대로.
+apply_status_patch = apply_section_patch
+
+
+def build_paper_session(payload, today):
+    """`[논문]` Issue → 논문 폴더에 쌓이는 세션 + 정제본/주석/READING_STATUS 패치.
+
+    제목 규약: `[논문] <paper-slug> — <섹션>`
+    slug는 `papers/` 아래 폴더 이름이 된다. 학습 노트와 달리 **날짜가 아니라 논문**이
+    묶는 단위다 — 한 편을 여러 세션에 걸쳐 관통하기 때문이다.
+    """
+    raw = assemble(payload)
+    user_fm, body = split_frontmatter(raw)
+
+    directives = {}
+    lines = body.splitlines()
+    while lines and re.match(r"^(slug|runner|tags)\s*:\s*\S", lines[0].strip()):
+        key, value = lines[0].split(":", 1)
+        directives[key.strip()] = value.strip()
+        lines.pop(0)
+    body = "\n".join(lines).strip()
+    user_fm = {**directives, **user_fm}
+
+    body, reading_patch = extract_status_patch(body, READING_STATUS_SECTION)
+    section_patches = {}
+    for name, filename in PAPER_SECTIONS.items():
+        body, section = pop_section(body, name)
+        if section:
+            section_patches[filename] = section
+
+    title = re.sub(r"^\s*\[논문\]\s*", "", payload.get("title") or "").strip()
+    head, _, tail = title.partition("—")
+    if not tail:
+        head, _, tail = title.partition(" - ")
+    slug = user_fm.get("slug") or slugify(head) or slugify(title)
+    if not slug:
+        raise SystemExit(
+            "제목에서 논문 slug를 못 찾았다 — `[논문] <paper-slug> — <섹션>` 형식이어야 한다."
+        )
+    section_name = (tail or "session").strip() or "session"
+
+    return {
+        "slug": slug,
+        "section": section_name,
+        "body": body,
+        "reading_patch": reading_patch,
+        "section_patches": section_patches,
+        "runner": user_fm.get("runner", "paper-gpt"),
+    }
+
+
+def write_paper_session(note, payload, today):
+    """세션 원문을 논문 폴더에 쓰고, 정제본·주석·READING_STATUS를 갱신한다."""
+    folder = os.path.join(PAPERS_DIR, note["slug"])
+    sessions = os.path.join(folder, "sessions")
+    os.makedirs(sessions, exist_ok=True)
+
+    marker = f"source_issue: {payload.get('number')}"
+    path = None
+    for name in sorted(os.listdir(sessions)):
+        if not name.endswith(".md"):
+            continue
+        cand = os.path.join(sessions, name)
+        with open(cand, encoding="utf-8") as f:
+            if marker in f.read(2000):
+                path = cand
+                break
+    if path is None:
+        path = os.path.join(sessions, f"{today}-{slugify(note['section']) or 'session'}.md")
+
+    fm = [
+        "---",
+        f'title: "{note["slug"]} — {note["section"]}"',
+        f"created: {today}",
+        f"updated: {today}",
+        "kind: paper-session",
+        f'runner: {note["runner"]}',
+        f"source_issue: {payload.get('number')}",
+        "---",
+    ]
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("\n".join(fm) + "\n\n" + note["body"].rstrip() + "\n")
+
+    touched = [path]
+    # 정제본·주석 — 파일이 없으면 만들어 준다(첫 세션에 폴더가 비어 있다).
+    for filename, content in note["section_patches"].items():
+        target = os.path.join(folder, filename)
+        if filename == "annotations.md":
+            # 주석은 세션마다 **쌓이는** 파일이지만, CI는 코멘트가 붙을 때마다 다시 돈다.
+            # 그냥 append하면 한 세션이 열 번 이어 써질 때 같은 인용이 열 번 쌓인다.
+            # 그래서 Issue 번호로 블록을 표시하고, 같은 블록은 덮어쓴다(재실행 안전).
+            marker = f"<!-- issue:{payload.get('number')} -->"
+            block = (
+                f"{marker}\n### {today} · {note['section']}\n{content.rstrip()}\n"
+                f"<!-- /issue:{payload.get('number')} -->\n"
+            )
+            if os.path.exists(target):
+                with open(target, encoding="utf-8") as f:
+                    existing = f.read()
+            else:
+                existing = "\n".join([
+                    "---", f'title: "{note["slug"]} — 주석"', "kind: annotations", "---",
+                    "", "# 하이라이트", "",
+                    "> 인용문과 내 코멘트가 세션마다 쌓인다(덮어쓰지 않는다).", "",
+                ]) + "\n"
+            start = existing.find(marker)
+            if start != -1:
+                end = existing.find(f"<!-- /issue:{payload.get('number')} -->", start)
+                end = len(existing) if end == -1 else end + len(f"<!-- /issue:{payload.get('number')} -->") + 1
+                existing = existing[:start] + block + existing[end:]
+            else:
+                existing = existing.rstrip() + "\n\n" + block
+            with open(target, "w", encoding="utf-8") as f:
+                f.write(existing)
+            touched.append(target)
+            continue
+
+        if not os.path.exists(target):
+            with open(target, "w", encoding="utf-8") as f:
+                f.write(
+                    "\n".join([
+                        "---", f'title: "{note["slug"]} — 정제본"',
+                        f"updated: {today}", "kind: paper", "---", "",
+                        f"# {note['slug']}", "",
+                        "> 검증된 이해만 담는다 — 설명하지 못한 것은 여기 오지 않는다(❓로 남긴다).",
+                        "",
+                    ]) + "\n"
+                )
+        # 정제본은 `### <절 이름>` 단위로 온다 — 없는 절은 뒤에 새로 붙인다.
+        with open(target, encoding="utf-8") as f:
+            existing = f.read()
+        patch = {}
+        current = None
+        for line in content.splitlines():
+            if line.startswith("### "):
+                current = line[4:].strip()
+                patch[current] = []
+            elif current is not None:
+                patch[current].append(line)
+        patch = {k: "\n".join(v).strip() for k, v in patch.items() if "\n".join(v).strip()}
+        missing = [k for k in patch if f"## {k}" not in existing]
+        if missing:
+            with open(target, "a", encoding="utf-8") as f:
+                for k in missing:
+                    f.write(f"\n## {k}\n\n")
+        apply_section_patch(patch, today, path=target)
+        touched.append(target)
+
+    # `papers/`는 sync_from_template의 NEVER 경로다 — 템플릿을 갱신해도 기존 학습자의
+    # repo에는 이 파일이 오지 않는다. 그래서 첫 논문 세션에서 여기서 만든다.
+    ensure_reading_status(today)
+    applied = apply_section_patch(note["reading_patch"], today, path=READING_STATUS_PATH)
+    return touched, applied
+
+
+READING_STATUS_TEMPLATE = """---
+title: "논문 읽기 상태 — 논문 러너 진입점"
+updated: {today}
+kind: reading-status
+---
+
+# 논문 읽기 상태
+
+> 논문 세션을 시작하면 러너가 가장 먼저 읽는 한 파일.
+> 세션이 끝나면 Issue의 `## READING_STATUS 갱신` 절로 갱신된다.
+
+## Progress
+
+- (아직 없음)
+
+## Current Understanding
+
+- (아직 없음)
+
+## Next Session
+
+- (다음 세션의 시작점 한 줄)
+"""
+
+
+def ensure_reading_status(today):
+    """없으면 만든다 — 있으면 손대지 않는다(학습자의 기록이다)."""
+    if os.path.exists(READING_STATUS_PATH):
+        return False
+    os.makedirs(PAPERS_DIR, exist_ok=True)
+    with open(READING_STATUS_PATH, "w", encoding="utf-8") as f:
+        f.write(READING_STATUS_TEMPLATE.format(today=today))
+    return True
 
 
 # --------------------------------------------------------------------------- main
@@ -456,6 +804,35 @@ def main():
 
     with open(args.payload, encoding="utf-8") as f:
         payload = json.load(f)
+
+    # `[논문]` — 논문 한 편을 여러 세션에 걸쳐 관통한다. 날짜가 아니라 논문이 묶는 단위다.
+    if (payload.get("title") or "").startswith("[논문]"):
+        note = build_paper_session(payload, args.today)
+        if args.dry_run:
+            print(f"[dry-run] papers/{note['slug']}/sessions/… ({note['section']})\n")
+            print(note["body"])
+            return
+        touched, applied = write_paper_session(note, payload, args.today)
+        report = [
+            f"✅ 논문 세션 기록 완료 — `{touched[0]}`",
+            "",
+            f"- 논문: `{note['slug']}` · 섹션: {note['section']}",
+        ]
+        if len(touched) > 1:
+            report.append("- 갱신: " + ", ".join(f"`{t}`" for t in touched[1:]))
+        if applied:
+            report.append(f"- READING_STATUS 갱신: {', '.join(applied)}")
+        else:
+            report.append(
+                "- ℹ️ READING_STATUS는 갱신하지 않았다 — `## READING_STATUS 갱신` 절이 없거나 "
+                f"`{READING_STATUS_PATH}`가 아직 없다."
+            )
+        text = "\n".join(report)
+        print(text)
+        if args.report:
+            with open(args.report, "w", encoding="utf-8") as f:
+                f.write(text + "\n")
+        return
 
     # `[자료]` — 세션 로그가 아니라 증류된 학습자료다. 별도 경로로 저장하고 끝낸다.
     if (payload.get("title") or "").startswith("[자료]"):
@@ -508,6 +885,8 @@ def main():
     with open(path, "w", encoding="utf-8") as f:
         f.write(note["content"])
     applied = apply_status_patch(note["status_patch"], args.today)
+    if append_trajectory(note["display"], note["date"], path, args.today):
+        applied.append(TRAJECTORY_SECTION)
     promoted = write_mastery_fragment(note["mastery"], note["track"], note["date"], note["slug"], path)
     drilled = append_drills(note["drills"], note["date"])
 

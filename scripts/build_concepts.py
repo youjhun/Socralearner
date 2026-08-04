@@ -32,6 +32,7 @@ MATERIALS_DIR = "materials"
 DRILLS = "drills.md"
 OUT = "concepts.json"
 SECTION = "개념 지도"
+SUBJECTS_PATH = "subjects.yaml"
 
 # ─────────────────────────── 개념 vs 항목 (2층 구조) ───────────────────────────
 #
@@ -423,6 +424,84 @@ def build(mastery, edges, domain_of, sources):
     return {"concepts": concepts, "drills": drills}
 
 
+# ────────────────────────── 분야 정규화 (subjects.yaml) ──────────────────────────
+#
+# 2026-08-04: 같은 과목이 여러 분야로 쪼개지는 것이 발견됐다 — 한 학습자의 그래프에서
+# "회로 등가화"(8)와 "전자회로 기초"(4)가 서로 다른 색으로 갈렸고, 21개는 아예 미분류였다.
+# 원인은 2026-08-03의 "개념의 단위" 사건과 같은 종류다: **분야의 단위가 어디에도 정의돼
+# 있지 않았다.** 정의가 없으면 모델은 그 세션에서 다룬 소주제를 소제목으로 단다.
+#
+# 여기서 하는 것은 둘뿐이다:
+#   ① 별칭 합치기 — `subjects.yaml`에 적힌 이름으로 통일한다(비어 있으면 아무것도 안 한다).
+#   ② 미분류 전파 — 선수관계로 이어진 이웃이 한 분야로만 분류돼 있으면 그 분야로 본다.
+#      이웃이 여러 분야면 **찍지 않는다** — 조용히 틀리는 것보다 미분류가 낫다.
+#
+# 분야는 라벨이지 학습 순서가 아니다(subjects.yaml 헤더 참조). 여기서 정규화하는 것은
+# 보는 축일 뿐이고, 무엇을 배울지는 이 파일이 정하지 않는다.
+
+
+def load_subjects():
+    """subjects.yaml → {별칭(정규화): 대표 이름}. 없거나 비면 빈 표(정규화 안 함)."""
+    if not os.path.exists(SUBJECTS_PATH):
+        return {}
+    try:
+        import yaml  # type: ignore
+        with open(SUBJECTS_PATH, encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+    except Exception:
+        return {}
+    alias_of = {}
+    for entry in (data.get("subjects") or []):
+        if not isinstance(entry, dict):
+            continue
+        name = (entry.get("name") or "").strip()
+        if not name:
+            continue
+        for alias in [name] + list(entry.get("aliases") or []):
+            alias = str(alias).strip()
+            if alias:
+                alias_of[_fold(alias)] = name
+    return alias_of
+
+
+def _fold(text):
+    """비교용 정규화 — 공백·기호를 지운다('회로 등가화' == '회로등가화')."""
+    return re.sub(r"[^\w가-힣]", "", str(text)).lower()
+
+
+def normalize_domains(domain_of, alias_of):
+    """노트에 적힌 분야 이름을 subjects.yaml의 대표 이름으로 합친다."""
+    if not alias_of:
+        return domain_of, 0
+    out, merged = {}, 0
+    for label, domain in domain_of.items():
+        canon = alias_of.get(_fold(domain))
+        if canon and canon != domain:
+            merged += 1
+        out[label] = canon or domain
+    return out, merged
+
+
+def propagate_domains(domain_of, edges, labels):
+    """미분류 개념을 선수관계 이웃의 분야로 채운다 — 이웃이 한 분야일 때만."""
+    neighbors = {}
+    for target, prereq in edges:
+        neighbors.setdefault(target, set()).add(prereq)
+        neighbors.setdefault(prereq, set()).add(target)
+
+    filled = {}
+    for label in labels:
+        if domain_of.get(label):
+            continue
+        found = {domain_of[n] for n in neighbors.get(label, ()) if domain_of.get(n)}
+        # 이웃이 두 분야 이상이면 찍지 않는다 — 가로지르는 개념일 수 있고,
+        # 그런 개념을 한쪽으로 밀어 넣으면 "어디에 걸쳐 있나"라는 정보가 사라진다.
+        if len(found) == 1:
+            filled[label] = next(iter(found))
+    domain_of = {**domain_of, **filled}
+    return domain_of, len(filled)
+
+
 def main():
     mastery = parse_mastery()
     edges, domain_of = parse_concept_map()
@@ -432,6 +511,10 @@ def main():
         labels.add(t)
         labels.add(p)
     sources = collect_sources(sorted(labels))
+
+    # 분야 정규화 — 별칭 합치기 → 미분류 전파. 둘 다 안전 기본값(못 정하면 안 바꾼다).
+    domain_of, n_merged = normalize_domains(domain_of, load_subjects())
+    domain_of, n_filled = propagate_domains(domain_of, edges, labels | set(domain_of))
 
     data = build(mastery, edges, domain_of, sources)
 
@@ -462,6 +545,16 @@ def main():
         print("      남기면 다음 빌드에서 개념으로 돌아온다(위계에 참여하면 항상 개념이다).")
     if n_edges == 0:
         print("   ℹ️  선수관계가 아직 없다. 세션에서 러너가 `## 개념 지도`에 `A ← B` 를 남기면 쌓인다.")
+    if n_merged:
+        print(f"   🔗 분야 별칭 {n_merged}건을 subjects.yaml의 대표 이름으로 합쳤다.")
+    if n_filled:
+        print(f"   🧭 미분류 {n_filled}개를 선수관계 이웃의 분야로 채웠다(이웃이 한 분야일 때만).")
+    n_unclassified = sum(1 for c in data["concepts"] if c["domain"] == UNCLASSIFIED)
+    if n_unclassified:
+        print(
+            f"   ℹ️  아직 미분류 {n_unclassified}개 — 이웃이 여러 분야이거나 연결이 없다. "
+            "찍지 않고 남겨 둔다."
+        )
     if n_domains == 0:
         print("   ℹ️  분야가 아직 없다. `## 개념 지도` 안에 `### 선형대수` 같은 소제목을 두면 분류된다.")
     if n_sources == 0:
