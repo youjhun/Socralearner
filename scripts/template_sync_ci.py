@@ -113,7 +113,8 @@ def notify(summary, skipped_workflows, notes, needs_hand, mode):
         ]
 
     lines += ["## 무엇이 바뀌었나", "", notes, "",
-              "<sub>매주 월요일 자동 확인. PR로 받으려면 저장소 변수 `TEMPLATE_SYNC_MODE=pr`. "
+              "<sub>세션이 끝날 때마다, 그리고 매일 09:20 KST에 자동 확인합니다. "
+              "PR로 받으려면 저장소 변수 `TEMPLATE_SYNC_MODE=pr`. "
               "그만 받으려면 Actions 탭에서 이 워크플로를 비활성화하세요.</sub>"]
 
     gh.create_issue(

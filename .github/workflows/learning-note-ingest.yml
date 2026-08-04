@@ -30,6 +30,7 @@ on:
 permissions:
   contents: write
   issues: write
+  actions: write  # 세션 끝에 template-sync를 깨우기 위해서만 쓴다(아래 마지막 스텝)
 
 concurrency:
   group: learning-note-ingest-${{ github.event.issue.number || github.event.inputs.issue }}
@@ -128,6 +129,20 @@ jobs:
               await github.rest.issues.update({ owner: context.repo.owner, repo: context.repo.repo,
                 issue_number: number, state: 'closed' });
             }
+
+      - name: 템플릿 업데이트 확인 (세션이 끝난 뒤 — 다음 세션은 최신으로 시작한다)
+        # 왜 여기인가: 템플릿이 고쳐져도 학습자 repo가 그것을 받는 시점이 cron뿐이면
+        # 최대 하루가 뜬다. 그리고 **관측 가능한 사건**은 "세션이 끝났다"이다 —
+        # 기록을 세션 시작에 걸었던 것과 같은 이유로, 동기화는 세션 끝에 건다.
+        #
+        # 반드시 커밋 스텝 **뒤**여야 한다. 앞에 두면 동기화의 푸시와 이 워크플로의
+        # 푸시가 같은 main을 두고 경합한다. 뒤에 두면 순서가 서로 어긋나지 않는다.
+        # 실패해도 세션 기록은 이미 끝났으므로 무시한다(`|| true`) — 동기화 실패로
+        # 학습 기록이 실패한 것처럼 보이면 안 된다.
+        if: always() && github.repository != 'youjhun/Socralearner'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run template-sync.yml || true
 
       - name: 실패를 Issue에 회신 (조용한 실패 금지)
         if: failure()
