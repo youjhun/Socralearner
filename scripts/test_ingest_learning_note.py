@@ -202,6 +202,72 @@ def main():
     )
     check("세션 원문은 남는다", "시행 간 상관의 낮음이다" in paper["body"])
 
+    # ⑥ 논문별 저장소 — meta.yaml · Parking Lot · 아티팩트 (2026-08-04)
+    #    러너의 논문 루프가 실제로 만드는 산출물이 받는 곳 없이 세션 원문에 묻히면,
+    #    다음 세션의 러너가 못 찾고 같은 선수지식을 매번 다시 미룬다.
+    print("\n논문별 저장소")
+    RICH_BODY = PAPER_BODY + """
+## 메타
+- title: EEG variability in MI-BCI
+- year: 2025
+- understanding: 기능적 이해
+- 지어낸키: 버려야 한다
+
+## Parking Lot
+- Fréchet mean — 평균의 일반화, 계산법은 미룸
+- SPD manifold
+
+## 아티팩트
+### Euclidean vs Fréchet mean
+- 유클리드 평균은 직선 위, Fréchet은 곡면 위
+"""
+    rich = ingest.build_paper_session(
+        {"number": 43, "title": "[논문] eeg-variability-mi-bci — Methods", "body": RICH_BODY,
+         "comments": []},
+        "2026-08-04",
+    )
+    check("메타가 키로 파싱된다", rich["meta"].get("year") == "2025", str(rich["meta"]))
+    check("이해 단계가 잡힌다", rich["meta"].get("understanding") == "기능적 이해")
+    check("모르는 키는 버린다", "지어낸키" not in rich["meta"], str(rich["meta"]))
+    check("Parking Lot 절이 잡힌다", "Fréchet mean" in rich["parking"])
+    check("아티팩트 절이 잡힌다", "### Euclidean vs Fréchet mean" in rich["artifacts"])
+    check(
+        "새 절들은 세션 원문에서 빠진다",
+        "Parking Lot" not in rich["body"] and "## 아티팩트" not in rich["body"],
+    )
+
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "parking-lot.md")
+        ingest.merge_parking_lot(path, "- Fréchet mean — 미룸\n- DTW", "p", "2026-08-04")
+        # 같은 항목이 다시 걸려도 목록이 부풀지 않아야 한다.
+        added, resolved = ingest.merge_parking_lot(
+            path, "- [x] Fréchet mean — 배웠다\n- SPD manifold", "p", "2026-08-05")
+        text = open(path, encoding="utf-8").read()
+        check("Parking Lot 항목이 중복되지 않는다", text.count("Fréchet mean") == 1, text)
+        check("해소는 [x]로 표시된다", "- [x] Fréchet mean" in text, text)
+        check("새 항목만 새로 센다", (added, resolved) == (1, 1), f"{added},{resolved}")
+        check("미해소 항목은 남는다", "- [ ] DTW" in text, text)
+
+        # 한 번 해소된 것을 다시 미해결로 내리지 않는다(러너가 옛 목록을 그대로 붙일 때).
+        ingest.merge_parking_lot(path, "- Fréchet mean", "p", "2026-08-06")
+        check("해소는 되돌아가지 않는다", "- [x] Fréchet mean" in
+              open(path, encoding="utf-8").read())
+
+        meta_path = os.path.join(tmp, "meta.yaml")
+        ingest.merge_meta(meta_path, {"title": "T", "year": "2025"}, "p", "2026-08-04")
+        ingest.merge_meta(meta_path, {"understanding": "비판적 이해"}, "p", "2026-08-05")
+        meta = open(meta_path, encoding="utf-8").read()
+        check("meta.yaml은 키 단위로 병합된다", "title: T" in meta and "비판적 이해" in meta, meta)
+
+        art_dir = os.path.join(tmp, "artifacts")
+        os.makedirs(art_dir)
+        written = ingest.write_artifacts(
+            art_dir, rich["artifacts"], "p", "2026-08-04", 43)
+        check("아티팩트가 제목마다 파일이 된다", len(written) == 1, str(written))
+        check("아티팩트 본문이 남는다",
+              "곡면 위" in open(written[0], encoding="utf-8").read())
+
     print()
     if FAILED:
         print(f"❌ 실패 {len(FAILED)}: " + ", ".join(FAILED))

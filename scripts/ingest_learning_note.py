@@ -114,10 +114,23 @@ DRILLS_HEADER = [
 #   papers/<slug>/paper.md                        정제본 — 검증된 이해만, 절 단위 교체
 #   papers/<slug>/annotations.md                  인용 + 코멘트, 쌓인다
 #   papers/READING_STATUS.md                      지금 읽는 논문·어디까지·다음 세션
+#   papers/<slug>/parking-lot.md                  미뤄 둔 선수지식 — 항목 단위로 병합
+#   papers/<slug>/meta.yaml                       서지 정보 + 현재 이해 단계
+#   papers/<slug>/artifacts/                      시각 아티팩트 — 제목마다 파일 하나
+#
+# 2026-08-04(2): Parking Lot·아티팩트·meta는 `runner/paper-mode.md`의 루프가 실제로
+# 만들어 내는 산출물인데 받는 곳이 없어 세션 원문에만 묻혀 있었다. 묻히면 다음 세션의
+# 러너가 못 찾고, 못 찾으면 같은 선수지식을 매번 다시 미룬다.
 PAPER_SECTIONS = {
     "정제본 갱신": "paper.md",
     "주석": "annotations.md",
 }
+PARKING_SECTION = "Parking Lot"
+ARTIFACT_SECTION = "아티팩트"
+META_SECTION = "메타"
+# meta.yaml에 받는 키. 모르는 키는 버린다 — 러너가 지어낸 필드로 파일이 자라지 않게.
+META_KEYS = ("title", "authors", "year", "venue", "link", "understanding", "next_section")
+UNDERSTANDING = ("미이해", "부분 이해", "기능적 이해", "비판적 이해")
 READING_STATUS_SECTION = "READING_STATUS 갱신"
 READING_STATUS_PATH = os.path.join(PAPERS_DIR, "READING_STATUS.md")
 
@@ -631,6 +644,12 @@ def build_paper_session(payload, today):
         if section:
             section_patches[filename] = section
 
+    # Parking Lot·아티팩트·메타는 정제본과 저장 규칙이 달라 따로 뗀다.
+    # (정제본은 절 단위 교체, 이쪽은 각각 병합·파일 분리·키 병합)
+    body, parking = pop_section(body, PARKING_SECTION)
+    body, artifacts = pop_section(body, ARTIFACT_SECTION)
+    body, meta = pop_section(body, META_SECTION)
+
     title = re.sub(r"^\s*\[논문\]\s*", "", payload.get("title") or "").strip()
     head, _, tail = title.partition("—")
     if not tail:
@@ -648,8 +667,146 @@ def build_paper_session(payload, today):
         "body": body,
         "reading_patch": reading_patch,
         "section_patches": section_patches,
+        "parking": parking,
+        "artifacts": artifacts,
+        "meta": parse_meta(meta),
         "runner": user_fm.get("runner", "paper-gpt"),
     }
+
+
+def parse_meta(section):
+    """`## 메타`의 `key: value` 줄을 딕셔너리로. 모르는 키는 버린다."""
+    meta = {}
+    for line in section.splitlines():
+        line = line.strip().lstrip("-").strip()
+        if ":" not in line:
+            continue
+        key, _, value = line.partition(":")
+        key, value = key.strip().strip("`"), value.strip()
+        if key in META_KEYS and value and not value.startswith("<"):
+            meta[key] = value
+    return meta
+
+
+def merge_meta(path, meta, slug, today):
+    """meta.yaml을 **키 단위로** 병합한다 — 안 온 키는 지우지 않는다.
+
+    러너가 매 세션 서지 정보를 다시 적을 필요가 없어야 한다(적으라고 하면 지어낸다).
+    YAML 라이브러리는 쓰지 않는다 — 이 파일은 평평한 `key: value`뿐이고, CI에
+    의존성을 늘리지 않는 것이 이 저장소의 규칙이다.
+    """
+    existing = {}
+    if os.path.exists(path):
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                if ":" in line and not line.lstrip().startswith("#"):
+                    key, _, value = line.partition(":")
+                    existing[key.strip()] = value.strip()
+    existing.update(meta)
+    existing["slug"] = slug
+    existing["updated"] = today
+
+    order = ["slug", *META_KEYS, "updated"]
+    lines = [
+        "# 논문 서지 + 현재 이해 단계 — 러너가 세션 시작에 읽는다.",
+        f"# understanding: {' / '.join(UNDERSTANDING)}",
+    ]
+    for key in order:
+        if key in existing:
+            lines.append(f"{key}: {existing[key]}")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+
+
+def merge_parking_lot(path, section, slug, today):
+    """Parking Lot을 **항목 단위로** 병합한다(중복 제거 · `- [x]`는 해소 표시).
+
+    같은 선수지식이 여러 세션에 걸쳐 다시 걸린다. 그냥 append하면 목록이 같은 항목으로
+    부풀어 "무엇이 남았나"를 못 읽는다. 그래서 항목 이름을 키로 병합하고, 한 번 해소된
+    것은 다시 미해결로 내려가지 않는다.
+    """
+    def key_of(text):
+        text = text.split("—")[0].split(" - ")[0]
+        return re.sub(r"\s+", " ", text).strip().lower()
+
+    items, order = {}, []
+    if os.path.exists(path):
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                m = re.match(r"^- \[([ x])\]\s*(.+)$", line.strip())
+                if m:
+                    key = key_of(m.group(2))
+                    if key not in items:
+                        order.append(key)
+                    items[key] = (m.group(1) == "x", m.group(2).rstrip())
+
+    added, resolved = 0, 0
+    for line in section.splitlines():
+        line = line.strip()
+        m = re.match(r"^- (?:\[([ x])\]\s*)?(.+)$", line)
+        if not m:
+            continue
+        done, text = m.group(1) == "x", m.group(2).rstrip()
+        key = key_of(text)
+        if not key:
+            continue
+        was = items.get(key)
+        if was is None:
+            order.append(key)
+            added += 1
+        elif done and not was[0]:
+            resolved += 1
+        # 해소는 되돌리지 않는다 — 한 번 배운 것을 다시 미해결로 적지 않는다.
+        items[key] = (done or (was[0] if was else False), text if not was or not was[0] else was[1])
+
+    header = [
+        "---", f'title: "{slug} — Parking Lot"', f"updated: {today}", "kind: parking-lot", "---",
+        "",
+        "# Parking Lot — 지금은 미룬 선수지식",
+        "",
+        "> 논문 읽기가 수학 공부로 탈선하지 않게, 지금 필요한 최소 의미만 듣고 여기로 보낸 것들.",
+        "> 별도 `[학습]` 세션의 재료가 된다. 해소되면 `- [x]`로 바뀐다.",
+        "",
+    ]
+    body = [f"- [{'x' if items[k][0] else ' '}] {items[k][1]}" for k in order]
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("\n".join(header + body) + "\n")
+    return added, resolved
+
+
+def write_artifacts(folder, section, slug, today, issue_number):
+    """`### <제목>` 마다 파일 하나 — `papers/<slug>/artifacts/`.
+
+    아티팩트는 다음 세션의 복습 장치다. 세션 원문 안에 묻히면 다시 못 찾으므로
+    제목을 파일 이름으로 꺼내 둔다. 같은 Issue가 다시 돌면 같은 파일을 덮어쓴다.
+    """
+    written = []
+    current, buf = None, []
+
+    def flush():
+        if current is None:
+            return
+        content = "\n".join(buf).strip()
+        if not content:
+            return
+        name = f"{today}-{slugify(current) or 'artifact'}.md"
+        path = os.path.join(folder, name)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("\n".join([
+                "---", f'title: "{current}"', f"paper: {slug}", f"created: {today}",
+                "kind: artifact", f"source_issue: {issue_number}", "---", "",
+                f"# {current}", "",
+            ]) + content + "\n")
+        written.append(path)
+
+    for line in section.splitlines():
+        if line.startswith("### "):
+            flush()
+            current, buf = line[4:].strip(), []
+        elif current is not None:
+            buf.append(line)
+    flush()
+    return written
 
 
 def write_paper_session(note, payload, today):
@@ -749,11 +906,31 @@ def write_paper_session(note, payload, today):
         apply_section_patch(patch, today, path=target)
         touched.append(target)
 
+    if note["meta"]:
+        merge_meta(os.path.join(folder, "meta.yaml"), note["meta"], note["slug"], today)
+        touched.append(os.path.join(folder, "meta.yaml"))
+
+    parked = (0, 0)
+    if note["parking"]:
+        parked = merge_parking_lot(
+            os.path.join(folder, "parking-lot.md"), note["parking"], note["slug"], today
+        )
+        touched.append(os.path.join(folder, "parking-lot.md"))
+
+    artifacts = []
+    if note["artifacts"]:
+        artifacts_dir = os.path.join(folder, "artifacts")
+        os.makedirs(artifacts_dir, exist_ok=True)
+        artifacts = write_artifacts(
+            artifacts_dir, note["artifacts"], note["slug"], today, payload.get("number")
+        )
+        touched += artifacts
+
     # `papers/`는 sync_from_template의 NEVER 경로다 — 템플릿을 갱신해도 기존 학습자의
     # repo에는 이 파일이 오지 않는다. 그래서 첫 논문 세션에서 여기서 만든다.
     ensure_reading_status(today)
     applied = apply_section_patch(note["reading_patch"], today, path=READING_STATUS_PATH)
-    return touched, applied
+    return touched, applied, {"parked": parked, "artifacts": artifacts}
 
 
 READING_STATUS_TEMPLATE = """---
@@ -812,12 +989,23 @@ def main():
             print(f"[dry-run] papers/{note['slug']}/sessions/… ({note['section']})\n")
             print(note["body"])
             return
-        touched, applied = write_paper_session(note, payload, args.today)
+        touched, applied, extra = write_paper_session(note, payload, args.today)
         report = [
             f"✅ 논문 세션 기록 완료 — `{touched[0]}`",
             "",
             f"- 논문: `{note['slug']}` · 섹션: {note['section']}",
         ]
+        if note["meta"].get("understanding"):
+            report.append(f"- 이해 단계: **{note['meta']['understanding']}**")
+        added, resolved = extra["parked"]
+        if added or resolved:
+            report.append(
+                f"- Parking Lot: 새 항목 {added}개"
+                + (f" · 해소 {resolved}개" if resolved else "")
+                + " → `papers/{}/parking-lot.md`".format(note["slug"])
+            )
+        if extra["artifacts"]:
+            report.append(f"- 아티팩트 {len(extra['artifacts'])}개 저장 (다음 세션 복습용)")
         if len(touched) > 1:
             report.append("- 갱신: " + ", ".join(f"`{t}`" for t in touched[1:]))
         if applied:
