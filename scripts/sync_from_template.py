@@ -69,6 +69,7 @@ NEVER = (
     "drills.md",
     "concepts.json",
     "topics.yaml",
+    "subjects.yaml",  # 분야 목록 — 학습자의 것이다(topics.yaml과 같은 성격)
     "README.md",
     "pilot/",  # 파일럿 롤업 산출물 — 내 저장소에서 계산된 내 수치다(pilot_rollup.py)
 )

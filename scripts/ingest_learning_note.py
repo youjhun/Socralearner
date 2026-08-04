@@ -749,8 +749,46 @@ def write_paper_session(note, payload, today):
         apply_section_patch(patch, today, path=target)
         touched.append(target)
 
+    # `papers/`는 sync_from_template의 NEVER 경로다 — 템플릿을 갱신해도 기존 학습자의
+    # repo에는 이 파일이 오지 않는다. 그래서 첫 논문 세션에서 여기서 만든다.
+    ensure_reading_status(today)
     applied = apply_section_patch(note["reading_patch"], today, path=READING_STATUS_PATH)
     return touched, applied
+
+
+READING_STATUS_TEMPLATE = """---
+title: "논문 읽기 상태 — 논문 러너 진입점"
+updated: {today}
+kind: reading-status
+---
+
+# 논문 읽기 상태
+
+> 논문 세션을 시작하면 러너가 가장 먼저 읽는 한 파일.
+> 세션이 끝나면 Issue의 `## READING_STATUS 갱신` 절로 갱신된다.
+
+## Progress
+
+- (아직 없음)
+
+## Current Understanding
+
+- (아직 없음)
+
+## Next Session
+
+- (다음 세션의 시작점 한 줄)
+"""
+
+
+def ensure_reading_status(today):
+    """없으면 만든다 — 있으면 손대지 않는다(학습자의 기록이다)."""
+    if os.path.exists(READING_STATUS_PATH):
+        return False
+    os.makedirs(PAPERS_DIR, exist_ok=True)
+    with open(READING_STATUS_PATH, "w", encoding="utf-8") as f:
+        f.write(READING_STATUS_TEMPLATE.format(today=today))
+    return True
 
 
 # --------------------------------------------------------------------------- main
