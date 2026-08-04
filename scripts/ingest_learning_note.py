@@ -41,6 +41,36 @@ REQUIRED_HEADINGS = ["오늘 직접 학습한 지식", "취약 영역", "다음 
 STATUS_SECTION = "STATUS 갱신"
 MASTERY_SECTION = "이해도 승급"
 
+# ─────────────────────── STATUS 승격 (노트 → STATUS.md) ───────────────────────
+#
+# 2026-08-04: STATUS.md의 쓰기 계약은 러너에게 넷을 요구하는데(오늘 목표·약점 top5·
+# 복습 top5·최근 궤적), `runner/instructions.md`의 노트 서식에는 `### 오늘 할 것`
+# 하나뿐이었다. 나머지 셋은 러너가 쓰지 않으니 패치할 내용이 없었고, STATUS.md는
+# 템플릿 자리표시자 그대로 남았다 — 앱에서 "지금 약한 것: 아직 없습니다"가 계속 뜬
+# 원인이다(유지훈 2026-08-04 보고).
+#
+# 고치는 방향은 서식에 절을 더 요구하는 것이 **아니다**. 약점과 복습 질문은 이미
+# `## 취약 영역` · `## 다음 복습 질문`으로 노트에 들어오고 CI가 필수 헤딩으로 검사까지
+# 한다. 같은 내용을 한 노트에 두 번 쓰게 하면 두 곳이 어긋나고, 한 곳을 빠뜨리면 이
+# 버그가 그대로 재발한다.
+#
+# 그래서 이 repo가 이미 택한 원칙을 따른다 — **큰 쓰기는 모델이 아니라 CI가
+# 결정론적으로**(learning-note-ingest.yml 헤더의 설계 근거). 러너는 자기만 아는 것
+# (`오늘 할 것`)만 쓰고, 나머지는 여기서 노트로부터 유도한다.
+#
+# 러너가 직접 쓴 절이 있으면 **그쪽이 이긴다** — 유도는 빈 자리를 메우는 것이지
+# 사람이 쓴 것을 덮는 것이 아니다.
+STATUS_DERIVED = [
+    # (노트 본문의 절, STATUS.md의 절, 최대 줄 수)
+    ("취약 영역", "지금 약한 것", 5),
+    ("다음 복습 질문", "다음 복습 질문", 5),
+]
+
+TRAJECTORY_SECTION = "최근 궤적"
+# 최근 궤적은 교체가 아니라 누적이다. 무한정 쌓으면 STATUS.md가 커져 러너가 매 세션
+# 통째로 읽는 비용이 오르므로(이 파일의 존재 이유가 "작게 유지"다) 최근 것만 남긴다.
+TRAJECTORY_KEEP = 7
+
 # `## 드릴 항목` — 회상 대상(단어 뜻·연호·값)은 개념 지도가 아니라 여기로 온다.
 # 2026-08-03: 토익 트랙에서 지식 그래프가 단어 단위로 생성된 것을 고치며 생긴 경로다.
 # 개념의 단위 정의는 runner/instructions.md의 "개념의 단위"에 있다. 여기는 그 저장 경로일 뿐이다.
@@ -157,6 +187,96 @@ def extract_status_patch(body):
     return body, patch
 
 
+def read_section(body, name):
+    """`## <name>` 절의 내용을 **떼어내지 않고** 읽는다(pop_section의 읽기 전용판)."""
+    lines = body.splitlines()
+    start = None
+    for i, line in enumerate(lines):
+        if line.startswith("## ") and name in line:
+            start = i
+            break
+    if start is None:
+        return ""
+    end = len(lines)
+    for i in range(start + 1, len(lines)):
+        if lines[i].startswith("## "):
+            end = i
+            break
+    return "\n".join(lines[start + 1:end]).strip()
+
+
+def _is_empty_marker(text):
+    """수집기가 자동 보정한 자리표시자는 내용이 아니다 — 승격하면 거짓이 쌓인다."""
+    stripped = text.strip().lstrip("-*0123456789. ").strip()
+    return not stripped or stripped in {"(이번 세션 기록 없음)", "(없음)", "없음"}
+
+
+def derive_status_patch(body, patch):
+    """러너가 안 쓴 STATUS 절을 노트 본문에서 유도한다(러너가 쓴 것이 우선)."""
+    patch = dict(patch)
+    for source, target, limit in STATUS_DERIVED:
+        if any(normalize_heading(target) in normalize_heading(k) for k in patch):
+            continue  # 러너가 직접 썼다 — 건드리지 않는다
+        section = read_section(body, source)
+        if not section:
+            continue
+        items = [ln.strip() for ln in section.splitlines() if ln.strip()]
+        items = [ln for ln in items if not ln.lstrip().startswith(">")]
+        items = [ln for ln in items if not _is_empty_marker(ln)]
+        if not items:
+            continue
+        numbered = []
+        for i, item in enumerate(items[:limit], 1):
+            numbered.append(f"{i}. {item.lstrip('-*0123456789. ').strip()}")
+        patch[target] = "\n".join(numbered)
+    return patch
+
+
+def append_trajectory(display, date, path, today):
+    """`## 최근 궤적`에 세션 한 줄을 누적한다 — 교체가 아니라 append."""
+    if not os.path.exists(STATUS_PATH):
+        return False
+    with open(STATUS_PATH, encoding="utf-8") as f:
+        lines = f.read().splitlines()
+
+    idx = None
+    for i, line in enumerate(lines):
+        if line.startswith("## ") and normalize_heading(TRAJECTORY_SECTION) in normalize_heading(line[3:]):
+            idx = i
+            break
+    if idx is None:
+        return False
+
+    end = len(lines)
+    for i in range(idx + 1, len(lines)):
+        if lines[i].startswith("## "):
+            end = i
+            break
+
+    keep, entries = [], []
+    for line in lines[idx + 1:end]:
+        if line.lstrip().startswith(">"):
+            keep.append(line)
+        elif line.strip().startswith("-"):
+            entries.append(line.strip())
+
+    # 첫 세션 전의 자리표시자는 실제 기록이 들어오면 사라져야 한다.
+    entries = [e for e in entries if "아직 없음" not in e]
+    entry = f"- {date} · {display} → [{path}]({path})"
+    entries = [e for e in entries if not e.startswith(f"- {date} · {display} ")]
+    entries.append(entry)
+    entries = entries[-TRAJECTORY_KEEP:]
+
+    lines[idx + 1:end] = keep + [""] + entries + [""]
+    for i, line in enumerate(lines[:20]):
+        if line.startswith("updated:"):
+            lines[i] = f"updated: {today}"
+            break
+    with open(STATUS_PATH, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines).rstrip() + "\n")
+    return True
+
+
 def ensure_headings(body):
     """정규 헤딩이 없으면 자리만 만들어 둔다 — 기록을 막는 대신 경고한다."""
     present = {normalize_heading(m) for m in re.findall(r"^#{1,6}\s*(.+)$", body, re.M)}
@@ -225,6 +345,8 @@ def build_note(payload, today):
     body, mastery = pop_section(body, MASTERY_SECTION)
     body, drills = pop_section(body, DRILLS_SECTION)
     body, missing = ensure_headings(body)
+    # 러너가 안 쓴 STATUS 절은 노트 본문에서 유도한다(모델에게 같은 말을 두 번 시키지 않는다).
+    status_patch = derive_status_patch(body, status_patch)
 
     # 제목 규약: `[학습] YYYY-MM-DD <slug> — <한 줄 제목>` (뒷부분은 선택)
     title = payload.get("title") or ""
@@ -276,6 +398,7 @@ def build_note(payload, today):
         "mastery": mastery,
         "drills": drills,
         "track": user_fm.get("track", ""),
+        "display": display,
         "missing": missing,
     }
 
@@ -508,6 +631,8 @@ def main():
     with open(path, "w", encoding="utf-8") as f:
         f.write(note["content"])
     applied = apply_status_patch(note["status_patch"], args.today)
+    if append_trajectory(note["display"], note["date"], path, args.today):
+        applied.append(TRAJECTORY_SECTION)
     promoted = write_mastery_fragment(note["mastery"], note["track"], note["date"], note["slug"], path)
     drilled = append_drills(note["drills"], note["date"])
 

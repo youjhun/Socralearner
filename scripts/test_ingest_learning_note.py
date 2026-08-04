@@ -8,6 +8,11 @@
      — `time_to_first_artifact`의 유일한 원자료라, 본문에 묻히면 셀 수 없다.
   ② `## 전이 시도` · `## 7일 재검증`이 **손대지 않은 채** daily 노트에 남는다
      — 수집기가 이 절들을 모르므로 통과만 하면 된다. 그 "모름"을 못박아 둔다.
+  ④ `## 취약 영역` · `## 다음 복습 질문`이 **STATUS.md로 승격된다** (2026-08-04)
+     — 러너의 노트 서식에는 `### 오늘 할 것`밖에 없어서 STATUS의 나머지 세 절이
+     영영 자리표시자로 남아 있었다. 모델에게 같은 내용을 두 번 쓰게 하는 대신
+     CI가 노트에서 유도한다. 러너가 직접 쓴 절은 덮지 않는다.
+
   ③ 두 절이 **없어도 경고가 뜨지 않는다** — 안 한 전이는 안 한 것이지 결함이 아니다.
      여기서 자동 보정이 끼면 매 세션 잔소리가 붙고, 그러면 사람이 형식을 버린다.
 """
@@ -118,6 +123,37 @@ def main():
     check(
         "artifact가 없으면 frontmatter에 키가 생기지 않는다",
         "artifact:" not in bare["content"],
+    )
+
+    # ④ STATUS 승격
+    print("\nSTATUS 승격 (노트 → STATUS.md)")
+    derived = ingest.build_note(payload(BODY_FULL, number=9), "2026-08-03")["status_patch"]
+    check("취약 영역이 '지금 약한 것'으로 승격된다", "음의 주파수" in derived.get("지금 약한 것", ""))
+    check("다음 복습 질문이 승격된다", "왜 곱셈이 회전인가" in derived.get("다음 복습 질문", ""))
+    check(
+        "승격된 항목은 번호 목록이 된다",
+        derived.get("지금 약한 것", "").startswith("1. "),
+        derived.get("지금 약한 것", ""),
+    )
+
+    RUNNER_WROTE = BODY_FULL + """
+## STATUS 갱신
+### 지금 약한 것
+1. 러너가 직접 고른 약점
+"""
+    kept = ingest.build_note(payload(RUNNER_WROTE, number=10), "2026-08-03")["status_patch"]
+    check(
+        "러너가 직접 쓴 절은 덮어쓰지 않는다",
+        kept.get("지금 약한 것", "").strip() == "1. 러너가 직접 고른 약점",
+        kept.get("지금 약한 것", ""),
+    )
+
+    # 자동 보정된 자리표시자가 승격되면 "약점 없음"이 약점으로 쌓인다.
+    placeholder = ingest.build_note(payload(BODY_MINIMAL, number=11), "2026-08-03")["status_patch"]
+    check(
+        "자동 보정 자리표시자는 승격하지 않는다",
+        "이번 세션 기록 없음" not in "".join(placeholder.values()),
+        str(placeholder),
     )
 
     print()
