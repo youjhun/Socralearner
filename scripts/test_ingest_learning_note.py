@@ -54,6 +54,12 @@ BODY_FULL = """artifact: https://github.com/me/study/blob/main/fourier.ipynb
 
 ## 다음 복습 질문
 1. 왜 곱셈이 회전인가
+
+## 현재 이해 수준
+- 회전으로는 설명하는데 음의 주파수는 아직 손이 안 간다
+
+## 미해결 질문
+- 실신호에서 음의 주파수가 물리적으로 무엇인가
 """
 
 BODY_MINIMAL = """## 목표
@@ -67,6 +73,12 @@ BODY_MINIMAL = """## 목표
 
 ## 다음 복습 질문
 1. 진폭이란
+
+## 현재 이해 수준
+- 사인파를 식으로는 적는다
+
+## 미해결 질문
+- 위상이 왜 필요한가
 """
 
 
@@ -155,6 +167,40 @@ def main():
         "이번 세션 기록 없음" not in "".join(placeholder.values()),
         str(placeholder),
     )
+
+    # ⑤ 논문 세션 (`[논문]`) — 2026-08-04에 열린 경로
+    print("\n논문 세션")
+    PAPER_BODY = """runner: paper-gpt
+
+## 내가 설명한 것
+- temporal variability는 시행 간 상관의 낮음이다
+
+## 정제본 갱신
+### Methods
+- 시행 간 상관의 낮음으로 정의 (p.4)
+
+## 주석
+> "we define temporal variability as ..." (p.4)
+
+## READING_STATUS 갱신
+### Progress
+- Methods 완료
+"""
+    paper = ingest.build_paper_session(
+        {"number": 42, "title": "[논문] eeg-variability-mi-bci — Methods", "body": PAPER_BODY,
+         "comments": []},
+        "2026-08-04",
+    )
+    check("논문 slug가 제목에서 나온다", paper["slug"] == "eeg-variability-mi-bci", paper["slug"])
+    check("섹션 이름이 제목 뒤쪽에서 나온다", paper["section"] == "Methods", paper["section"])
+    check("정제본 갱신이 paper.md로 간다", "paper.md" in paper["section_patches"])
+    check("주석이 annotations.md로 간다", "annotations.md" in paper["section_patches"])
+    check("READING_STATUS 패치가 잡힌다", "Progress" in paper["reading_patch"])
+    check(
+        "패치 절은 세션 원문에서 빠진다",
+        "정제본 갱신" not in paper["body"] and "READING_STATUS" not in paper["body"],
+    )
+    check("세션 원문은 남는다", "시행 간 상관의 낮음이다" in paper["body"])
 
     print()
     if FAILED:
