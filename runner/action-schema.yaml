@@ -4,41 +4,60 @@
 # 인증: Authentication = API Key / Auth Type = Bearer / 값 = 아래 권한의 fine-grained PAT.
 #
 # PAT 권한 (자기 학습 repo 하나만 선택):
-#   - Contents: Read-only        ← STATUS·daily 읽기
+#   - Contents: Read-only        ← STATUS·daily·모드 대본 읽기
 #   - Issues:   Read and write   ← 세션 기록 쓰기
 #   ※ Contents write는 필요 없다. 파일을 만드는 것은 모델이 아니라 CI다.
 #     이유: Contents API는 파일 본문 전체를 base64 한 덩어리로 요구해서, 노트가
 #     길어지면 인코딩이 깨지고 커밋이 실패한다(모델이 "3줄 요약"으로 스스로 줄어든다).
 #     그래서 모델은 평문만 쓰고, 파일 생성은 결정론적 CI가 맡는다.
 #
+# ⚠️ 2026-08-04 — **읽기 액션을 폴더별로 쪼갰다. 왜 그래야만 하는가:**
+#   예전에는 `/repos/{owner}/{repo}/contents/{path}` 하나로 모든 파일을 읽으려 했다.
+#   그런데 경로 파라미터는 클라이언트가 **퍼센트 인코딩**한다 — `runner/paper-mode.md`가
+#   `runner%2Fpaper-mode.md`로 나가고 GitHub은 404를 준다. 즉 **하위 폴더 파일은 하나도
+#   못 읽었다**(루트의 STATUS.md만 우연히 동작). 404가 반복되면 GPT는 액션을 포기하고
+#   웹 검색으로 넘어간다 — "저장소를 전혀 못 읽고 검색만 한다"의 정체다.
+#   그래서 폴더를 URL에 **고정**하고, 파라미터에는 슬래시 없는 이름만 받는다.
+#
 # 쓰기 프로토콜:
-#   ① createNote 로 Issue 생성 (제목: `[학습] YYYY-MM-DD <slug> — <한 줄 제목>`)
+#   ① createNote 로 Issue 생성 (제목은 `[학습]`·`[논문]`·`[자료]`·`[설정]` 중 하나로 시작)
 #   ② 길면 appendNote 로 이어 쓴다 (한 번에 ~40줄, 절 단위로 끊는다)
-#   ③ closeNote 로 종료 → CI가 daily/ 에 파일을 만들고 결과를 그 Issue에 코멘트로 회신
+#   ③ closeNote 로 종료 → CI가 파일을 만들고 결과를 그 Issue에 코멘트로 회신
+#
+# 붙여넣은 뒤 **반드시 한 번 확인한다**:
+#   GPT에게 "STATUS.md 읽어봐"          → 평문이 오면 읽기 성공
+#   GPT에게 "runner/paper-mode.md 읽어봐" → readRunnerFile 로 읽어야 한다
+#   웹 검색을 하거나 "찾을 수 없다"고 하면 액션이 안 붙은 것이다(스키마·PAT을 다시 본다).
 
 openapi: 3.1.0
 info:
   title: Socralearner 학습 러너 API
   description: 학습 세션의 읽기(Contents 평문)와 쓰기(Issue 평문) 경로.
-  version: 1.0.0
+  version: 2.0.0
 servers:
   - url: https://api.github.com
 
 paths:
-  /repos/{owner}/{repo}/contents/{path}:
+  # ─────────────────────────── 읽기 ───────────────────────────
+  # 폴더는 URL에 고정하고 파일 이름만 파라미터로 받는다(파라미터에 슬래시 금지).
+
+  /repos/{owner}/{repo}/contents/{file}:
     get:
       operationId: readFile
-      summary: repo 파일을 평문으로 읽는다 (STATUS.md, daily/*.md, mastery.md 등)
+      summary: 저장소 **루트** 파일을 평문으로 읽는다 (STATUS.md · mastery.md · drills.md · topics.yaml · concepts.json)
       description: >-
+        루트 파일 전용이다. 하위 폴더는 폴더별 액션을 쓴다 —
+        runner/ → readRunnerFile, papers/ → readPapersFile,
+        papers/<slug>/ → readPaperFile, daily/ → readDailyFile,
+        materials/ → readMaterialFile.
         Accept 헤더를 application/vnd.github.raw 로 보내면 base64가 아니라 평문이 온다.
-        base64 응답은 모델이 디코딩할 수 없으므로 이 헤더는 항상 보낸다.
       parameters:
         - { name: owner, in: path, required: true, schema: { type: string } }
         - { name: repo,  in: path, required: true, schema: { type: string } }
-        - name: path
+        - name: file
           in: path
           required: true
-          description: "repo 루트 기준 경로. 예: STATUS.md"
+          description: "루트 파일 이름. 슬래시를 넣지 마라. 예: STATUS.md"
           schema: { type: string }
         - name: Accept
           in: header
@@ -54,10 +73,173 @@ paths:
             text/plain:
               schema: { type: string }
 
+  /repos/{owner}/{repo}/contents/runner/{file}:
+    get:
+      operationId: readRunnerFile
+      summary: 모드 대본을 읽는다 (paper-mode.md · exam-mode.md · topics.md)
+      description: >-
+        논문 세션·시험 세션·주제 갱신에 들어가기 **전에** 해당 대본을 읽는다.
+        지침 본문에는 진입점만 있고 대본은 여기 있다.
+      parameters:
+        - { name: owner, in: path, required: true, schema: { type: string } }
+        - { name: repo,  in: path, required: true, schema: { type: string } }
+        - name: file
+          in: path
+          required: true
+          description: "예: paper-mode.md"
+          schema: { type: string }
+        - name: Accept
+          in: header
+          required: true
+          schema:
+            type: string
+            enum: ["application/vnd.github.raw"]
+            default: "application/vnd.github.raw"
+      responses:
+        "200":
+          description: 파일 평문
+          content:
+            text/plain:
+              schema: { type: string }
+
+  /repos/{owner}/{repo}/contents/papers/{file}:
+    get:
+      operationId: readPapersFile
+      summary: 논문 트랙의 공용 파일 (READING_STATUS.md · inbox.md)
+      parameters:
+        - { name: owner, in: path, required: true, schema: { type: string } }
+        - { name: repo,  in: path, required: true, schema: { type: string } }
+        - name: file
+          in: path
+          required: true
+          description: "예: READING_STATUS.md"
+          schema: { type: string }
+        - name: Accept
+          in: header
+          required: true
+          schema:
+            type: string
+            enum: ["application/vnd.github.raw"]
+            default: "application/vnd.github.raw"
+      responses:
+        "200":
+          description: 파일 평문
+          content:
+            text/plain:
+              schema: { type: string }
+
+  /repos/{owner}/{repo}/contents/papers/{slug}/{file}:
+    get:
+      operationId: readPaperFile
+      summary: 논문 한 편의 파일 (paper.md · meta.yaml · parking-lot.md · annotations.md)
+      parameters:
+        - { name: owner, in: path, required: true, schema: { type: string } }
+        - { name: repo,  in: path, required: true, schema: { type: string } }
+        - name: slug
+          in: path
+          required: true
+          description: "papers/ 아래 논문 폴더 이름. 예: eeg-variability-mi-bci"
+          schema: { type: string }
+        - name: file
+          in: path
+          required: true
+          description: "예: parking-lot.md"
+          schema: { type: string }
+        - name: Accept
+          in: header
+          required: true
+          schema:
+            type: string
+            enum: ["application/vnd.github.raw"]
+            default: "application/vnd.github.raw"
+      responses:
+        "200":
+          description: 파일 평문
+          content:
+            text/plain:
+              schema: { type: string }
+
+  /repos/{owner}/{repo}/contents/daily/{file}:
+    get:
+      operationId: readDailyFile
+      summary: 지난 세션 노트 하나를 읽는다 (daily/YYYY-MM-DD-<slug>.md)
+      parameters:
+        - { name: owner, in: path, required: true, schema: { type: string } }
+        - { name: repo,  in: path, required: true, schema: { type: string } }
+        - name: file
+          in: path
+          required: true
+          description: "예: 2026-08-04-fourier.md"
+          schema: { type: string }
+        - name: Accept
+          in: header
+          required: true
+          schema:
+            type: string
+            enum: ["application/vnd.github.raw"]
+            default: "application/vnd.github.raw"
+      responses:
+        "200":
+          description: 파일 평문
+          content:
+            text/plain:
+              schema: { type: string }
+
+  /repos/{owner}/{repo}/contents/materials/{file}:
+    get:
+      operationId: readMaterialFile
+      summary: 증류된 강의자료·과목 지도를 읽는다 (materials/<slug>.md)
+      parameters:
+        - { name: owner, in: path, required: true, schema: { type: string } }
+        - { name: repo,  in: path, required: true, schema: { type: string } }
+        - name: file
+          in: path
+          required: true
+          description: "예: signals-and-systems.md"
+          schema: { type: string }
+        - name: Accept
+          in: header
+          required: true
+          schema:
+            type: string
+            enum: ["application/vnd.github.raw"]
+            default: "application/vnd.github.raw"
+      responses:
+        "200":
+          description: 파일 평문
+          content:
+            text/plain:
+              schema: { type: string }
+
+  # ─────────────────────────── 목록 ───────────────────────────
+
+  /repos/{owner}/{repo}/contents/papers:
+    get:
+      operationId: listPapers
+      summary: 읽는 중인 논문 폴더 목록 — slug를 모를 때 여기서 확인한다
+      description: slug를 지어내지 마라. 모르면 여기서 실제 폴더 이름을 본 뒤 readPaperFile 을 쓴다.
+      parameters:
+        - { name: owner, in: path, required: true, schema: { type: string } }
+        - { name: repo,  in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: 항목 목록
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    name: { type: string }
+                    type: { type: string }
+
+  # ─────────────────────────── 쓰기 ───────────────────────────
+
   /repos/{owner}/{repo}/issues:
     post:
       operationId: createNote
-      summary: 학습 세션 기록을 시작한다 (Issue 생성 — 평문, base64 없음)
+      summary: 기록을 시작한다 (Issue 생성 — 평문, base64 없음)
       parameters:
         - { name: owner, in: path, required: true, schema: { type: string } }
         - { name: repo,  in: path, required: true, schema: { type: string } }
@@ -71,10 +253,13 @@ paths:
               properties:
                 title:
                   type: string
-                  description: "`[학습] YYYY-MM-DD <slug> — <한 줄 제목>` (반드시 [학습]으로 시작)"
+                  description: >-
+                    `[학습] YYYY-MM-DD <slug> — <제목>` · `[논문] <slug> — <섹션>` ·
+                    `[자료] YYYY-MM-DD <slug> — <자료 이름>` · `[설정] topics — <이유>`
+                    중 하나로 **반드시 말머리부터** 시작한다(CI 게이트가 이걸로 갈린다).
                 body:
                   type: string
-                  description: "세션 노트 본문(마크다운 평문). 길면 나눠서 appendNote로 이어 쓴다."
+                  description: "본문(마크다운 평문). 길면 나눠서 appendNote로 이어 쓴다."
       responses:
         "201":
           description: 생성된 Issue
@@ -89,7 +274,7 @@ paths:
   /repos/{owner}/{repo}/issues/{issue_number}/comments:
     post:
       operationId: appendNote
-      summary: 앞서 만든 Issue에 노트를 이어 쓴다 (긴 세션용)
+      summary: 앞서 만든 Issue에 이어 쓴다 (긴 세션용)
       parameters:
         - { name: owner, in: path, required: true, schema: { type: string } }
         - { name: repo,  in: path, required: true, schema: { type: string } }
@@ -109,7 +294,7 @@ paths:
   /repos/{owner}/{repo}/issues/{issue_number}:
     patch:
       operationId: closeNote
-      summary: Issue를 닫아 기록을 확정한다 → CI가 daily/ 파일을 만든다
+      summary: Issue를 닫아 기록을 확정한다 → CI가 파일을 만든다
       parameters:
         - { name: owner, in: path, required: true, schema: { type: string } }
         - { name: repo,  in: path, required: true, schema: { type: string } }

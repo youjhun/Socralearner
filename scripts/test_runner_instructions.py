@@ -100,6 +100,33 @@ paper_contract = ("## 메타", "## 정제본 갱신", "## 주석", "## Parking L
 missing = [c for c in paper_contract if c not in paper_mode]
 check("논문 모드의 절 이름이 전부 살아 있다", not missing, f"사라진 것: {missing}")
 
+# ── Action 스키마 ─────────────────────────────────────────────────────────
+#
+# 2026-08-04 사고: 읽기 경로가 `contents/{path}` 하나였다. 경로 파라미터는 클라이언트가
+# 퍼센트 인코딩하므로 `runner/paper-mode.md`가 `runner%2Fpaper-mode.md`로 나가 404가 났다.
+# 하위 폴더 파일을 하나도 못 읽고, GPT는 액션을 포기하고 웹 검색으로 넘어갔다.
+# 사람 눈으로는 멀쩡해 보이는 스키마라, 이 불변식은 기계가 지켜야 한다.
+SCHEMA = ROOT / "runner" / "action-schema.yaml"
+if SCHEMA.exists():
+    schema_text = SCHEMA.read_text(encoding="utf-8")
+    body = schema_text[schema_text.index("openapi:"):]
+    paths = re.findall(r"^  (/\S+):", body, re.M)
+    check("스키마에 읽기·쓰기 경로가 있다", len(paths) >= 5, f"{len(paths)}개")
+
+    # `{...}` 파라미터가 통째로 한 URL 세그먼트여야 한다. 슬래시를 품는 파라미터
+    # (`{path}` 같은 것)는 인코딩되어 반드시 404가 난다.
+    bad = [p for p in paths if re.search(r"\{[^}]*(path|filepath|full)[^}]*\}", p)]
+    check("슬래시를 품는 경로 파라미터가 없다", not bad, f"{bad} — 폴더를 URL에 고정해라")
+
+    # 지침·대본이 부르는 액션 이름이 스키마에 실제로 있어야 한다.
+    op_ids = set(re.findall(r"operationId:\s*(\w+)", body))
+    referenced = set()
+    for rel in ("runner/instructions.md", *MODES):
+        text = (ROOT / rel).read_text(encoding="utf-8")
+        referenced |= {m for m in re.findall(r"`(read\w+|listPapers|createNote|appendNote|closeNote)`", text)}
+    missing_ops = sorted(referenced - op_ids)
+    check("지침이 부르는 액션이 스키마에 전부 있다", not missing_ops, f"없는 것: {missing_ops}")
+
 if ADDENDUM.exists():
     text = ADDENDUM.read_text(encoding="utf-8")
     check("toeic addendum은 붙여넣기가 아니라 모드 파일을 가리킨다",

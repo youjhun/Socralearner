@@ -42,7 +42,7 @@
 
 | 가져올 파일 | 무엇 |
 |---|---|
-| [`.github/workflows/template-sync.yml`](https://github.com/youjhun/Socralearner/blob/main/.github/workflows/template-sync.yml) | 매주 월요일에 템플릿을 확인해 적용한다 |
+| [`.github/workflows/template-sync.yml`](https://github.com/youjhun/Socralearner/blob/main/.github/workflows/template-sync.yml) | 세션이 끝날 때·매일 09:20 KST에 템플릿을 확인해 적용한다 |
 
 이거 하나뿐입니다. 동기화 로직은 **매번 템플릿에서 새로 받아 실행**하므로 저장소에 미리
 넣어 둘 필요가 없습니다(그래야 로직이 낡아 동기화가 실패하는 자기모순이 안 생깁니다).

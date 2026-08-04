@@ -3,10 +3,10 @@ title: "시험 모드 — 오답에서 규칙을 세우는 대본"
 kind: runner-mode
 ---
 
-# 시험 모드 (러너가 시험 트랙 세션에서 readFile로 읽는 대본)
+# 시험 모드 (러너가 시험 트랙 세션에서 `readRunnerFile`로 읽는 대본)
 
 > **이 파일은 GPT 지침 칸에 붙여넣지 않는다.** STATUS의 트랙이 시험이면 러너가
-> `runner/exam-mode.md`를 readFile로 읽어 그대로 따른다. 그래서 고쳐도 지침을 다시
+> `readRunnerFile`(file=`exam-mode.md`)로 읽어 그대로 따른다. 그래서 고쳐도 지침을 다시
 > 붙여넣을 필요가 없다(`template-sync`가 파일을 갱신한다).
 
 ## 무엇이 다른가
