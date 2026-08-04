@@ -134,6 +134,16 @@ UNDERSTANDING = ("미이해", "부분 이해", "기능적 이해", "비판적 �
 READING_STATUS_SECTION = "READING_STATUS 갱신"
 READING_STATUS_PATH = os.path.join(PAPERS_DIR, "READING_STATUS.md")
 
+# ─────────────────────────── 설정 (`[설정]`) ───────────────────────────
+#
+# 2026-08-04: `topics.yaml`을 사람이 손으로 쓰게 하는 것이 병목이었다. YAML 문법이
+# 깨지고, 영어 검색어를 짓기 번거롭고, 무엇보다 **분야 고정**을 사람이 할 리 없다.
+# 러너(이미 LLM이다)가 만들어 평문 Issue로 넘기고, 파일은 여기서 결정론적으로 쓴다.
+# 학습 노트와 같은 계열 — 모델은 평문만, 파일은 CI.
+TOPICS_PATH = "topics.yaml"
+TOPICS_SECTION = "주제"
+TOPIC_FIELDS = ("query", "seed", "topics", "field", "exclude")
+
 BOT_SUFFIX = "[bot]"
 COMMAND_PREFIX = ("/기록", "/ingest", "/skip", "<!-- ingest")
 
@@ -958,6 +968,107 @@ kind: reading-status
 """
 
 
+def build_topics(payload):
+    """`[설정]` Issue의 `## 주제` 절 → [{id, label, query, seed, …}].
+
+    형식(러너가 쓰는 것 — `runner/topics.md`와 같아야 한다):
+
+        ## 주제
+        ### hbm | HBM (고대역폭 메모리)
+        query: high bandwidth memory stacked DRAM
+        seed: 10.1109/ISSCC.2022.9731621
+        exclude: breast milk | lactation
+
+        ### remove | 지울 주제
+        remove: true
+    """
+    body = assemble(payload)
+    _, section = pop_section(body, TOPICS_SECTION)
+    if not section:
+        raise SystemExit(
+            "`## 주제` 절이 없다 — `[설정]` Issue는 그 절에 주제를 적어야 한다."
+        )
+
+    topics, current = [], None
+    for line in section.splitlines():
+        line = line.rstrip()
+        if line.startswith("### "):
+            head = line[4:].strip()
+            tid, _, label = head.partition("|")
+            current = {"id": slugify(tid.strip()) or slugify(head), "label": label.strip() or tid.strip()}
+            topics.append(current)
+            continue
+        m = re.match(r"^\s*-?\s*(\w+)\s*:\s*(.+)$", line)
+        if m and current is not None:
+            key, value = m.group(1).strip(), m.group(2).strip()
+            if key == "remove":
+                current["remove"] = value.lower() in ("true", "yes", "1", "예")
+            elif key in TOPIC_FIELDS:
+                current[key] = value
+    return [t for t in topics if t.get("id") and (t.get("query") or t.get("remove"))]
+
+
+def merge_topics(new, path=TOPICS_PATH):
+    """topics.yaml을 id 단위로 병합한다 — 러너가 빠뜨린 주제를 지우지 않는다.
+
+    파일 위쪽의 주석·설정(mailto·window_days…)은 그대로 두고 `topics:` 블록만 다시 쓴다.
+    그 주석이 사람이 이 파일을 이해하는 유일한 문서라, 러너가 갱신했다고 사라지면 안 된다.
+    """
+    header, existing = [], []
+    if os.path.exists(path):
+        with open(path, encoding="utf-8") as f:
+            lines = f.read().splitlines()
+        cut = next((i for i, l in enumerate(lines) if re.match(r"^topics:", l)), len(lines))
+        header = lines[:cut]
+        cur = None
+        for line in lines[cut:]:
+            m = re.match(r"^\s*-\s*(\w+):\s*(.*)$", line)
+            if m:
+                cur = {m.group(1): m.group(2).strip().strip("\"'")}
+                existing.append(cur)
+                continue
+            m = re.match(r"^\s+(\w+):\s*(.*)$", line)
+            if m and cur is not None and not line.lstrip().startswith("#"):
+                cur[m.group(1)] = m.group(2).strip().strip("\"'")
+    if not header:
+        header = ["# 논문 스케줄링 — 러너가 `[설정]` Issue로 갱신한다.", ""]
+
+    by_id = {t.get("id"): t for t in existing if t.get("id")}
+    order = [t.get("id") for t in existing if t.get("id")]
+    added, updated, removed = [], [], []
+    for t in new:
+        tid = t["id"]
+        if t.get("remove"):
+            if tid in by_id:
+                by_id.pop(tid)
+                order.remove(tid)
+                removed.append(tid)
+            continue
+        if tid in by_id:
+            by_id[tid].update({k: v for k, v in t.items() if k != "remove"})
+            updated.append(tid)
+        else:
+            by_id[tid] = {k: v for k, v in t.items() if k != "remove"}
+            order.append(tid)
+            added.append(tid)
+
+    out = list(header)
+    if out and out[-1].strip():
+        out.append("")
+    out.append("topics:")
+    if not order:
+        out[-1] = "topics: []"
+    for tid in order:
+        t = by_id[tid]
+        out.append(f"  - id: {tid}")
+        for key in ("label", *TOPIC_FIELDS):
+            if t.get(key):
+                out.append(f'    {key}: "{str(t[key]).replace(chr(34), chr(39))}"')
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("\n".join(out) + "\n")
+    return added, updated, removed
+
+
 def ensure_reading_status(today):
     """없으면 만든다 — 있으면 손대지 않는다(학습자의 기록이다)."""
     if os.path.exists(READING_STATUS_PATH):
@@ -1015,6 +1126,47 @@ def main():
                 "- ℹ️ READING_STATUS는 갱신하지 않았다 — `## READING_STATUS 갱신` 절이 없거나 "
                 f"`{READING_STATUS_PATH}`가 아직 없다."
             )
+        text = "\n".join(report)
+        print(text)
+        if args.report:
+            with open(args.report, "w", encoding="utf-8") as f:
+                f.write(text + "\n")
+        return
+
+    # `[설정]` — 학습 기록이 아니라 설정 파일(topics.yaml)의 쓰기 경로다.
+    if (payload.get("title") or "").startswith("[설정]"):
+        topics = build_topics(payload)
+        if not topics:
+            raise SystemExit("주제를 하나도 못 읽었다 — `### <id> | <라벨>` 형식이어야 한다.")
+        if args.dry_run:
+            print(f"[dry-run] {TOPICS_PATH}\n")
+            print(json.dumps(topics, ensure_ascii=False, indent=2))
+            return
+        added, updated, removed = merge_topics(topics)
+        unanchored = [
+            t["id"] for t in topics
+            if not t.get("remove") and not (t.get("seed") or t.get("topics") or t.get("field"))
+        ]
+        report = [f"✅ 연구 주제 갱신 — `{TOPICS_PATH}`", ""]
+        if added:
+            report.append(f"- 추가: {', '.join(f'`{t}`' for t in added)}")
+        if updated:
+            report.append(f"- 갱신: {', '.join(f'`{t}`' for t in updated)}")
+        if removed:
+            report.append(f"- 삭제: {', '.join(f'`{t}`' for t in removed)}")
+        if unanchored:
+            report += [
+                "",
+                f"⚠️ **분야가 고정되지 않은 주제**: {', '.join(f'`{t}`' for t in unanchored)}",
+                "",
+                "이 주제들은 단어로만 검색된다 — 약어가 겹치면 엉뚱한 분야가 섞인다"
+                "(`HBM` → high bandwidth memory / human breast milk).",
+                "러너에게 **씨앗 논문 DOI**를 하나 주면(`seed:`) 그 논문의 분야로 고정된다.",
+            ]
+        report += [
+            "",
+            "> 다음 `paper-scan`(매주 월요일 또는 Actions → Run workflow)부터 적용된다.",
+        ]
         text = "\n".join(report)
         print(text)
         if args.report:

@@ -268,6 +268,57 @@ def main():
         check("아티팩트 본문이 남는다",
               "곡면 위" in open(written[0], encoding="utf-8").read())
 
+    # ⑦ `[설정]` → topics.yaml (2026-08-04)
+    #    사람이 YAML을 손으로 쓰면 문법이 깨지고, 무엇보다 분야를 고정하지 않는다.
+    print("\n연구 주제 설정")
+    SETTING_BODY = """## 주제
+
+### hbm | HBM (고대역폭 메모리)
+query: high bandwidth memory stacked DRAM
+seed: 10.1109/ISSCC.2022.9731621
+exclude: breast milk | lactation
+
+### old | 안 볼 주제
+remove: true
+"""
+    topics = ingest.build_topics(
+        {"number": 50, "title": "[설정] topics — 첫 세션", "body": SETTING_BODY, "comments": []})
+    check("주제 id·라벨이 갈린다", topics[0]["id"] == "hbm" and "고대역폭" in topics[0]["label"],
+          str(topics[0]))
+    check("씨앗 논문이 잡힌다", topics[0].get("seed", "").startswith("10."), str(topics[0]))
+    check("삭제 지시가 잡힌다", topics[1].get("remove") is True, str(topics[1]))
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "topics.yaml")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("# 내 주석은 살아남아야 한다\nwindow_days: 14\n\ntopics:\n"
+                    "  - id: old\n    label: \"안 볼 주제\"\n    query: \"x\"\n"
+                    "  - id: keep\n    label: \"러너가 안 적은 주제\"\n    query: \"y\"\n")
+        added, updated, removed = ingest.merge_topics(topics, path=path)
+        out = open(path, encoding="utf-8").read()
+        check("새 주제가 추가된다", "hbm" in added and "id: hbm" in out, out)
+        check("remove가 실제로 지운다", removed == ["old"] and "id: old" not in out, out)
+        check("러너가 안 적은 주제는 남는다", "id: keep" in out, out)
+        check("파일 위쪽 주석·설정이 살아남는다",
+              "내 주석은 살아남아야 한다" in out and "window_days: 14" in out, out)
+
+        # scan_papers가 이 파일을 실제로 읽을 수 있어야 한다 — 형식이 어긋나면
+        # 주제가 통째로 사라지고 "이번 주 0편"으로만 보인다.
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import scan_papers  # noqa: E402
+        cfg = scan_papers.load_yaml(path)
+        ids = [t.get("id") for t in cfg.get("topics") or []]
+        check("scan_papers가 그대로 읽는다", "hbm" in ids and "keep" in ids, str(ids))
+        hbm = next(t for t in cfg["topics"] if t.get("id") == "hbm")
+        check("씨앗이 왕복해서 살아남는다", hbm.get("seed", "").startswith("10."), str(hbm))
+        check("배제어가 실제로 거른다",
+              scan_papers.drop_excluded(
+                  [{"title": "Human breast milk composition", "abstract": ""},
+                   {"title": "HBM thermal throttling", "abstract": ""}], hbm)[1] == 1)
+        check("분야 고정이 있으면 필터가 붙는다",
+              "primary_topic.field.id:fields/22" in scan_papers._filter_of({"field": "fields/22"}))
+        check("고정이 없으면 필터가 비어 있다", scan_papers._filter_of({"query": "x"}) == "")
+
     print()
     if FAILED:
         print(f"❌ 실패 {len(FAILED)}: " + ", ".join(FAILED))

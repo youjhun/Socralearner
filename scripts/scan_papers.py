@@ -104,7 +104,7 @@ def normalize_work(w):
     }
 
 
-def build_inbox(date, found, window_days, failed=()):
+def build_inbox(date, found, window_days, failed=(), unanchored=(), excluded=0):
     """주제별 새 논문 → inbox 마크다운 (순수 — 테스트 가능).
 
     `failed`는 조회 자체가 실패한 주제들이다. **"새 논문이 없다"와 "가져오지 못했다"는
@@ -132,6 +132,17 @@ def build_inbox(date, found, window_days, failed=()):
             "> `paper-scan → Run workflow`로 다시 돌리면 된다.",
             "",
         ]
+    if unanchored:
+        lines += [
+            f"> ⚠️ **분야가 고정되지 않은 주제 {len(unanchored)}개** — {', '.join(unanchored)}",
+            "> 이 주제들은 단어로만 검색된다. 약어가 겹치면 엉뚱한 분야의 논문이 섞인다"
+            "(`HBM` → high bandwidth memory / human breast milk).",
+            "> 세션에서 러너에게 **\"이 주제 분야 고정해줘\"** 라고 하면, 이미 읽은 논문을"
+            " 씨앗으로 삼아 분야를 잡아 준다 — 사람이 코드를 찾을 필요는 없다.",
+            "",
+        ]
+    if excluded:
+        lines += [f"> 배제어로 거른 논문 {excluded}편 (0편으로 보이는 것과 다르다).", ""]
 
     if total == 0:
         lines += [
@@ -265,6 +276,29 @@ def select_papers(recent, proven, seen_ids, per_topic, blocked):
 
 # ---------------------------------------------------------------- 네트워크
 
+def _fetch_raw(url, attempts=3):
+    """단건 조회(work 하나) — 목록이 아니라 객체를 그대로 돌려준다."""
+    ua = UA if not MAILTO else f"{UA} mailto:{MAILTO}"
+    if MAILTO:
+        url = f"{url}?mailto={urllib.parse.quote(MAILTO)}"
+    last = None
+    for i in range(attempts):
+        req = urllib.request.Request(url, headers={"User-Agent": ua, "Accept": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=25) as r:
+                return json.load(r)
+        except urllib.error.HTTPError as e:
+            last = e
+            if e.code not in (403, 429, 500, 502, 503, 504) or i == attempts - 1:
+                raise
+        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as e:
+            last = e
+            if i == attempts - 1:
+                raise
+        time.sleep(2 ** i)
+    raise last
+
+
 def _fetch(params, attempts=3):
     """OpenAlex 조회. 일시적인 한도·장애는 물러났다 다시 시도한다.
 
@@ -294,26 +328,110 @@ def _fetch(params, attempts=3):
     raise last  # 도달하지 않는다 — 위에서 항상 raise 하거나 return 한다
 
 
-def fetch_recent(query, window_days):
+# ------------------------------------------------------- 주제 고정 (분야 앵커)
+#
+# 2026-08-04: `HBM`으로 주제를 잡았더니 **human breast milk** 논문이 왔다.
+# 질의를 다듬어 고칠 문제가 아니다 — 자연어 검색은 "분야"를 모르기 때문에, 약어가
+# 겹치는 모든 주제에서 같은 일이 반복된다(MI: motor imagery/myocardial infarction,
+# CNN: 신경망/방송사, ADC: 아날로그-디지털/항체-약물 접합체 …).
+# 배제어 목록으로 막으면 두더지 잡기가 된다 — 겪은 오검출만 막고, 처음 보는 것은 못 막는다.
+#
+# 근본 대안: **주제를 단어가 아니라 OpenAlex의 분야 id로 고정한다.** OpenAlex의 모든
+# 논문에는 topic → subfield → field → domain 계층이 붙어 있다. 주제에 field/topic을
+# 걸어 두면 breast milk 논문은 **애초에 후보에 들어오지 못한다**(다른 field라서).
+#
+# 분야 id를 사람이 찾아 적게 하면 아무도 안 한다. 그래서 **씨앗 논문(seed)** 에서
+# 유도한다 — 방금 읽은 논문 하나가 그 주제의 정의다. 러너가 논문을 다 읽으면
+# `[설정]` Issue에 그 논문 DOI를 씨앗으로 넣고, 여기서 분야를 읽어 필터로 쓴다.
+
+
+def _filter_of(topic):
+    """주제의 분야 고정을 OpenAlex filter 조각으로. 없으면 빈 문자열(= 옛 동작)."""
+    parts = []
+    topic_ids = topic.get("topics") or topic.get("topic_ids")
+    if isinstance(topic_ids, str):
+        topic_ids = [x.strip() for x in re.split(r"[|,]", topic_ids) if x.strip()]
+    if topic_ids:
+        parts.append("primary_topic.id:" + "|".join(topic_ids))
+    field = topic.get("field")
+    if field:
+        parts.append(f"primary_topic.field.id:{field}")
+    return "," + ",".join(parts) if parts else ""
+
+
+def resolve_seeds(topic):
+    """씨앗 논문 → 그 논문들의 topic id 목록. 실패하면 빈 목록(조용히 죽지 않는다).
+
+    씨앗은 DOI(`10.…`)나 OpenAlex work id(`W…`)를 받는다. 사람이 분야 코드를 찾아
+    적을 필요가 없게 하는 것이 전부다 — "이 논문과 같은 분야"가 사람이 실제로 갖고
+    있는 정보다.
+    """
+    seeds = topic.get("seed") or topic.get("seeds") or []
+    if isinstance(seeds, str):
+        seeds = [x.strip() for x in re.split(r"[|,]", seeds) if x.strip()]
+    ids = []
+    for s in seeds[:3]:
+        s = s.strip().rstrip("/")
+        if s.lower().startswith("10."):
+            key = f"https://doi.org/{s}"
+        elif s.upper().startswith("W"):
+            key = s
+        else:
+            key = s
+        try:
+            raw = _fetch_raw(f"{OPENALEX}/{urllib.parse.quote(key, safe=':/')}")
+        except Exception as e:  # 씨앗 하나가 죽어도 나머지로 간다
+            print(f"⚠️  씨앗 '{s}' 조회 실패: {e}", file=sys.stderr)
+            continue
+        primary = (raw.get("primary_topic") or {})
+        if primary.get("id"):
+            ids.append(primary["id"].rsplit("/", 1)[-1])
+    return ids
+
+
+def fetch_recent(query, window_days, anchor=""):
     """신간 트랙 — 최근 N일, **최신순**. 신간은 인용으로 못 거른다."""
     since = (datetime.date.today() - datetime.timedelta(days=window_days)).isoformat()
     return _fetch({
         "search": query,
-        "filter": f"from_publication_date:{since}",
+        "filter": f"from_publication_date:{since}{anchor}",
         "sort": "publication_date:desc",
         "per-page": "25",
     })
 
 
-def fetch_proven(query):
+def fetch_proven(query, anchor=""):
     """검증 트랙 — 최근 2년, **인용순**. 여기선 인용이 진짜 신호다."""
     since = (datetime.date.today() - datetime.timedelta(days=PROVEN_DAYS)).isoformat()
     return _fetch({
         "search": query,
-        "filter": f"from_publication_date:{since}",
+        "filter": f"from_publication_date:{since}{anchor}",
         "sort": "cited_by_count:desc",
         "per-page": "25",
     })
+
+
+def drop_excluded(papers, topic):
+    """배제어 — 분야 고정을 못 건 주제의 **응급 처치**(근본 대책은 분야 고정이다).
+
+    제목·초록에 배제어가 있으면 버린다. 몇 편을 왜 버렸는지는 인박스에 적는다 —
+    조용히 버리면 "이번 주는 논문이 없네"로 보이고, 그건 다른 상태다.
+    """
+    terms = topic.get("exclude") or []
+    if isinstance(terms, str):
+        terms = [x.strip() for x in re.split(r"[|,]", terms) if x.strip()]
+    terms = [t.lower() for t in terms if t]
+    if not terms:
+        return papers, 0
+    kept = []
+    dropped = 0
+    for p in papers:
+        text = (p.get("title", "") + " " + p.get("abstract", "")).lower()
+        if any(t in text for t in terms):
+            dropped += 1
+        else:
+            kept.append(p)
+    return kept, dropped
 
 
 # ---------------------------------------------------------------- main
@@ -354,17 +472,31 @@ def main():
     if blocked:
         print(f"막힌 길목 {len(blocked)}개를 가중치로 사용: " + ", ".join(l for l, _ in blocked[:3]) + ("…" if len(blocked) > 3 else ""))
 
-    found, new_ids, failed = {}, [], []
+    found, new_ids, failed, unanchored, dropped_total = {}, [], [], [], 0
     for t in topics:
         label = t.get("label") or t.get("id") or t["query"]
+        anchor = _filter_of(t)
+        if not anchor and not args.dry_run:
+            # 분야 고정이 없으면 씨앗 논문에서 유도해 본다. 그것도 없으면 옛 동작
+            # (자연어 검색만) — 그 경우 인박스에 경고를 적는다. HBM이 breast milk로
+            # 새던 상태가 바로 이 상태다.
+            seeded = resolve_seeds(t)
+            if seeded:
+                anchor = "," + "primary_topic.id:" + "|".join(seeded)
+                print(f"- {label}: 씨앗 논문에서 분야 고정 → {', '.join(seeded)}")
+        if not anchor:
+            unanchored.append(label)
         try:
-            recent = [] if args.dry_run else fetch_recent(t["query"], window)
-            proven = [] if args.dry_run else fetch_proven(t["query"])
+            recent = [] if args.dry_run else fetch_recent(t["query"], window, anchor)
+            proven = [] if args.dry_run else fetch_proven(t["query"], anchor)
         except Exception as e:  # 한 주제가 실패해도 나머지는 계속
             print(f"⚠️  '{label}' 조회 실패: {e}", file=sys.stderr)
             found[label] = []
             failed.append(label)
             continue
+        recent, d1 = drop_excluded(recent, t)
+        proven, d2 = drop_excluded(proven, t)
+        dropped_total += d1 + d2
         fresh = select_papers(recent, proven, set(seen), per_topic, blocked)
         for p in fresh:
             new_ids.append(p["id"])
@@ -374,7 +506,7 @@ def main():
 
     total = sum(len(v) for v in found.values())
     with open(INBOX_PATH, "w", encoding="utf-8") as f:
-        f.write(build_inbox(date, found, window, failed))
+        f.write(build_inbox(date, found, window, failed, unanchored, dropped_total))
 
     for i in new_ids:
         seen[i] = date

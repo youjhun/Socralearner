@@ -4,7 +4,24 @@
 # `papers/`에 모아 주고 Issue로 알려준다(내 repo의 GitHub Actions가 함).
 # 학습 세션을 시작하면 러너가 이 목록을 보고 "이번 주 새 논문"을 학습에 엮는다.
 #
-# 쓰는 법: query는 **영어**로. 논문 검색은 영어가 압도적으로 잘 걸린다.
+# 쓰는 법: **손으로 쓰지 않아도 된다.** 세션에서 러너에게 "연구 주제 잡아줘"라고 하면
+# 목표와 읽은 논문을 보고 만들어 `[설정]` Issue로 넘기고, CI가 이 파일을 쓴다
+# (YAML 문법을 사람이 맞출 일이 없다). 손으로 고쳐도 물론 된다.
+#
+# ⚠️ **분야를 고정해라 — 이게 이 파일에서 제일 중요하다.**
+# 자연어 검색은 분야를 모른다. `HBM`으로 주제를 잡았더니 high bandwidth memory가
+# 아니라 **human breast milk** 논문이 왔다(2026-08-04). 약어가 겹치는 모든 주제에서
+# 같은 일이 난다(MI, CNN, ADC, …). 배제어로 막으면 겪은 것만 막고 처음 보는 것은 못 막는다.
+#
+# 그래서 주제마다 아래 중 **하나**를 넣는다 — 그러면 다른 분야의 논문은 애초에 후보에
+# 들어오지 못한다:
+#   seed:   씨앗 논문 DOI 1~3편 — **이게 기본**이다. "이 논문과 같은 분야"가 사람이
+#           실제로 갖고 있는 정보다. CI가 그 논문의 OpenAlex topic을 읽어 필터로 쓴다.
+#   topics: OpenAlex topic id (T12345) — 씨앗에서 한 번 뽑아 두면 매주 조회가 준다.
+#   field:  OpenAlex field id (fields/22) — 더 넓게 잡고 싶을 때.
+# exclude: 배제어는 **응급 처치**다. 분야 고정을 대신하지 못한다.
+#
+# query는 **영어**로. 논문 검색은 영어가 압도적으로 잘 걸린다.
 # 필요 없으면 topics를 비워 두면 된다(그러면 아무것도 안 한다).
 #
 # 수동으로 지금 당장 돌려보려면:
@@ -28,7 +45,10 @@ topics: []
   # - id: my-lab
   #   label: "우리 연구실 주제"
   #   query: "neural prosthetics implantable electrode decoding"
+  #   seed: "10.1109/TNSRE.2021.3049134"   # ← 이 논문과 같은 분야만 (권장)
 
-  # - id: example-mosfet
-  #   label: "MOSFET 신뢰성"
-  #   query: "MOSFET threshold voltage reliability degradation"
+  # - id: hbm
+  #   label: "HBM (고대역폭 메모리)"
+  #   query: "high bandwidth memory stacked DRAM through-silicon via"
+  #   seed: "10.1109/ISSCC.2022.9731621"
+  #   exclude: "breast milk | lactation"    # 응급 처치 — 분야 고정의 대체물이 아니다
