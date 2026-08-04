@@ -1,2 +1,24 @@
 __pycache__/
 *.py[cod]
+
+# ── 개인정보 경계 (2026-08-04) ────────────────────────────────────────────
+# 아래 파일들은 참가자를 식별할 수 있다. 이 저장소는 공개이므로 절대 커밋되면 안 된다.
+# 파일럿 계약(`Topdown/docs/experiments/proof-system.md` §8.2)이 "저장소 이름·사용자명은
+# 밖으로 나가지 않는다"고 못박은 것을, 실수로도 깨지지 않게 도구 층에서 막는다.
+#
+# fleet 목록 = 참가자 저장소 이름 목록 = 사실상 참가자 명단이다.
+# `pilot_cohort.py --file fleet.txt` / `check_fleet.py`가 읽는 파일.
+fleet.txt
+fleet*.txt
+fleet*.json
+roster*.md
+roster*.yaml
+
+# 토큰·환경변수
+.env
+.env.*
+*.token
+
+# 개인 학습 데이터가 실수로 템플릿 저장소에 들어오는 것을 막는다.
+# (참가자 저장소에서는 이 경로가 정상이지만, 여기는 템플릿이다.)
+/pilot/rollup.json
