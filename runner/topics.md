@@ -3,9 +3,9 @@ title: "연구 주제 잡기 — 분야로 고정하고, 씨앗 논문으로 정
 kind: runner-mode
 ---
 
-# 연구 주제 (러너가 `topics.yaml`을 갱신할 때 readFile로 읽는 대본)
+# 연구 주제 (러너가 `topics.yaml`을 갱신할 때 `readRunnerFile`로 읽는 대본)
 
-> **이 파일은 GPT 지침 칸에 붙여넣지 않는다.** 주제를 제안하기 직전에 readFile로 읽는다.
+> **이 파일은 GPT 지침 칸에 붙여넣지 않는다.** 주제를 제안하기 직전에 `readRunnerFile`로 읽는다.
 
 `topics.yaml`은 매주 새 논문을 자동 수집하는 검색 설정이다. 사람이 YAML을 손으로 쓰면
 문법이 깨지고, 무엇보다 **분야를 고정하지 않는다.** 그래서 네가 만들어 Issue로 넘기고
