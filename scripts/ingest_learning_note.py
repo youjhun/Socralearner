@@ -169,6 +169,26 @@ TRACKS_PATH = "tracks.yaml"
 TRACKS_SECTION = "트랙"
 TRACK_FIELDS = ("label", "mode", "goal")
 
+# 2026-08-05: `subjects.yaml` — 그래프의 **색**이 되는 분야.
+#
+# 러너가 `## 개념 지도`의 `###` 소제목을 매번 새로 지어서 같은 것이 여러 조각으로
+# 갈라졌다(파일럿에서 실제로 "회로 등가화 6 · 전자회로 5 · 전자회로 기초 4 · 미분류 22"가
+# 나왔다 — 앞의 셋은 다 같은 전자회로다). 합치는 표는 이미 `build_concepts`가 읽는데,
+# **그 표를 채울 쓰기 경로가 없었다.** 여기가 그 경로다.
+#
+# 형식이 트랙·주제와 다른 이유: 이건 id를 정하는 일이 아니라 **묶는 일**이다.
+# 대표 이름 아래에 "이렇게 적혀도 같은 것"을 나열한다.
+#
+#     ## 분야
+#     ### 전자회로
+#     - 회로 등가화
+#     - 전자회로 기초
+#
+# 대주제 묶음은 **사람이 한다**(유지훈 2026-08-05) — 러너가 마음대로 합치면 학습자가
+# 일부러 나눠 둔 것까지 뭉갠다.
+SUBJECTS_PATH = "subjects.yaml"
+SUBJECTS_SECTION = "분야"
+
 BOT_SUFFIX = "[bot]"
 COMMAND_PREFIX = ("/기록", "/ingest", "/skip", "<!-- ingest")
 
@@ -1089,10 +1109,11 @@ def build_topics(payload):
     """
     body = assemble(payload)
     _, section = pop_section(body, TOPICS_SECTION)
+    # 2026-08-05: 절이 셋(`트랙`·`분야`·`주제`)으로 늘면서 여기서 예외를 던지면 안 된다 —
+    # 분배기가 세 파서를 차례로 시도하므로, "내 절이 아니다"는 빈 목록으로 답해야 한다.
+    # 무엇도 못 읽었을 때의 오류는 분배기가 세 절을 모두 언급하며 낸다.
     if not section:
-        raise SystemExit(
-            "`## 주제` 절이 없다 — `[설정]` Issue는 그 절에 주제를 적어야 한다."
-        )
+        return []
 
     topics, current = [], None
     for line in section.splitlines():
@@ -1150,6 +1171,113 @@ def build_tracks(payload):
             elif key in TRACK_FIELDS:
                 current[key] = value
     return [t for t in tracks if t.get("id")]
+
+
+def build_subjects(payload):
+    """`## 분야` → [{name, aliases[], remove?}].
+
+    `### 대표 이름` 아래의 불릿이 별칭이다. 별칭이 없어도 유효하다 — 이름만 등록해 두면
+    그 이름으로 적힌 것들이 한 분야로 모인다.
+    """
+    body = assemble(payload)
+    _, section = pop_section(body, SUBJECTS_SECTION)
+    if not section:
+        return []
+
+    subjects, current = [], None
+    for line in section.splitlines():
+        line = line.rstrip()
+        head = re.match(r"^###\s+(.+?)\s*$", line)
+        if head:
+            current = {"name": head.group(1).strip().strip("`"), "aliases": []}
+            subjects.append(current)
+            continue
+        if current is None:
+            continue
+        item = re.match(r"^\s*[-*]\s+(.+?)\s*$", line)
+        if not item:
+            continue
+        value = item.group(1).strip().strip("`")
+        if re.match(r"^remove\s*:", value, re.I):
+            current["remove"] = value.split(":", 1)[1].strip().lower() in ("true", "yes", "1", "예")
+        elif value:
+            current["aliases"].append(value)
+    return [s for s in subjects if s.get("name")]
+
+
+def merge_subjects(new, path=SUBJECTS_PATH):
+    """subjects.yaml을 대표 이름 단위로 병합한다 — 별칭은 **합집합**이다.
+
+    별칭을 교체하지 않는 이유: 이 파일은 여러 세션에 걸쳐 자란다. 이번에 적지 않은 별칭을
+    지우면 지난번에 합쳐 둔 것이 다시 갈라지고, 그래프의 색이 널뛴다.
+
+    파일 위쪽 주석은 그대로 둔다 — 사람이 이 파일을 이해하는 유일한 문서다.
+    """
+    header, existing = [], []
+    if os.path.exists(path):
+        with open(path, encoding="utf-8") as f:
+            lines = f.read().splitlines()
+        cut = next((i for i, l in enumerate(lines) if re.match(r"^subjects:", l)), len(lines))
+        header = lines[:cut]
+        cur = None
+        for line in lines[cut:]:
+            if line.lstrip().startswith("#"):
+                continue
+            m = re.match(r"^\s*-\s*name:\s*(.+)$", line)
+            if m:
+                cur = {"name": m.group(1).strip().strip("\"'"), "aliases": []}
+                existing.append(cur)
+                continue
+            if cur is None:
+                continue
+            a = re.match(r"^\s+-\s+(.+)$", line)
+            if a:
+                cur["aliases"].append(a.group(1).strip().strip("\"'"))
+    if not header:
+        header = [
+            "# 분야(subject) — 지식 그래프에서 개념을 묶어 보는 라벨.",
+            "#",
+            "# 대표 이름 아래 별칭을 적으면 노트에 그렇게 적혀도 한 분야로 합쳐진다.",
+            "# 비어 있으면 정규화를 하지 않는다(안전 기본값).",
+            "",
+        ]
+
+    by_name = {s["name"]: s for s in existing}
+    order = [s["name"] for s in existing]
+    added, updated, removed = [], [], []
+    for s in new:
+        name = s["name"]
+        if s.get("remove"):
+            if name in by_name:
+                by_name.pop(name)
+                order.remove(name)
+                removed.append(name)
+            continue
+        if name in by_name:
+            seen = set(by_name[name]["aliases"])
+            fresh = [a for a in s["aliases"] if a not in seen]
+            if fresh:
+                by_name[name]["aliases"].extend(fresh)   # 합집합 — 지우지 않는다
+                updated.append(name)
+        else:
+            by_name[name] = {"name": name, "aliases": list(s["aliases"])}
+            order.append(name)
+            added.append(name)
+
+    out = list(header)
+    if out and out[-1].strip():
+        out.append("")
+    out.append("subjects:" if order else "subjects: []")
+    for name in order:
+        out.append(f'  - name: "{name.replace(chr(34), chr(39))}"')
+        aliases = by_name[name]["aliases"]
+        if aliases:
+            out.append("    aliases:")
+            for a in aliases:
+                out.append(f'      - "{a.replace(chr(34), chr(39))}"')
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("\n".join(out) + "\n")
+    return added, updated, removed
 
 
 def merge_tracks(new, path=TRACKS_PATH):
@@ -1370,10 +1498,37 @@ def main():
             if not build_topics(payload):
                 return
 
+        subjects = build_subjects(payload)
+        if subjects:
+            if args.dry_run:
+                print(f"[dry-run] {SUBJECTS_PATH}\n")
+                print(json.dumps(subjects, ensure_ascii=False, indent=2))
+                return
+            added, updated, removed = merge_subjects(subjects)
+            report = [f"✅ 분야 갱신 — `{SUBJECTS_PATH}`", ""]
+            if added:
+                report.append(f"- 추가: {', '.join(f'`{t}`' for t in added)}")
+            if updated:
+                report.append(f"- 별칭 추가: {', '.join(f'`{t}`' for t in updated)}")
+            if removed:
+                report.append(f"- 삭제: {', '.join(f'`{t}`' for t in removed)}")
+            report += [
+                "",
+                "> 다음 세션의 개념 지도부터 이 이름으로 합쳐집니다. 지난 노트는 고치지 "
+                "않습니다 — 합치기는 그래프를 만들 때 일어납니다(`build_concepts`).",
+            ]
+            text = "\n".join(report)
+            print(text)
+            if args.report:
+                with open(args.report, "w", encoding="utf-8") as f:
+                    f.write(text + "\n")
+            return
+
         topics = build_topics(payload)
         if not topics:
             raise SystemExit(
-                "`## 주제`도 `## 트랙`도 못 읽었다 — `### <id> | <라벨>` 형식이어야 한다."
+                "`## 트랙`·`## 분야`·`## 주제` 중 어느 절도 못 읽었다 — "
+                "`[설정]` Issue는 그중 한 절에 `### <이름>` 형식으로 적어야 한다."
             )
         if args.dry_run:
             print(f"[dry-run] {TOPICS_PATH}\n")
