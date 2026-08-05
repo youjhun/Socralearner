@@ -28,7 +28,8 @@ BUDGET = 7000       # 우리 예산 — 남는 1,000자는 `# 이 학습자` 블
 
 # 모드 대본은 지침 박스가 아니라 저장소 파일이다(러너가 readFile로 읽는다).
 # 그래서 길이 예산을 먹지 않고, 고쳐도 지침을 다시 붙여넣지 않아도 된다.
-MODES = ("runner/paper-mode.md", "runner/exam-mode.md", "runner/topics.md")
+MODES = ("runner/paper-mode.md", "runner/exam-mode.md", "runner/topics.md",
+         "runner/subject-mode.md")
 
 # CI(scripts/ingest_learning_note.py 등)가 이 이름으로 노트를 읽는다.
 # 하나라도 사라지면 그 절은 영영 파일로 만들어지지 않는다.
@@ -50,7 +51,6 @@ CONTRACT = (
     "## 드릴 항목",
     "## 이해도 승급",
     "[학습]",
-    "[자료]",
     "[설정]",
     "createNote",
     "appendNote",
@@ -99,6 +99,11 @@ paper_contract = ("## 메타", "## 정제본 갱신", "## 주석", "## Parking L
                   "## 아티팩트", "## READING_STATUS 갱신", "[논문]")
 missing = [c for c in paper_contract if c not in paper_mode]
 check("논문 모드의 절 이름이 전부 살아 있다", not missing, f"사라진 것: {missing}")
+
+# `[자료]` Issue 규약은 과목 모드 대본이 갖는다(지침에서 여기로 옮겼다).
+subject_mode = (ROOT / "runner" / "subject-mode.md").read_text(encoding="utf-8")
+check("과목 모드가 `[자료]` 증류 규약을 갖고 있다", "[자료]" in subject_mode,
+      "증류 Issue 규약이 사라지면 materials/가 영영 안 만들어진다")
 
 # ── Action 스키마 ─────────────────────────────────────────────────────────
 #
