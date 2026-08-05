@@ -29,7 +29,8 @@ BUDGET = 7000       # 우리 예산 — 남는 1,000자는 `# 이 학습자` 블
 # 모드 대본은 지침 박스가 아니라 저장소 파일이다(러너가 readFile로 읽는다).
 # 그래서 길이 예산을 먹지 않고, 고쳐도 지침을 다시 붙여넣지 않아도 된다.
 MODES = ("runner/paper-mode.md", "runner/exam-mode.md", "runner/topics.md",
-         "runner/subject-mode.md", "runner/research-mode.md")
+         "runner/subject-mode.md", "runner/research-mode.md",
+         "runner/concept-map.md")
 
 # CI(scripts/ingest_learning_note.py 등)가 이 이름으로 노트를 읽는다.
 # 하나라도 사라지면 그 절은 영영 파일로 만들어지지 않는다.
@@ -113,6 +114,21 @@ check("연구 모드가 기존 쓰기 계약을 쓴다",
       "새 Issue 접두어를 만들면 CI가 못 받는다")
 check("연구 모드가 반증 조건을 요구한다", "반증 조건" in research_mode,
       "반증 조건이 없으면 무엇이 나와도 '맞았다'가 된다")
+
+# 2026-08-05: 개념 지도는 **학습 로그가 아니라 커리큘럼**이 됐다(유지훈).
+# 조각으로 자라면 "이 개념이 대체 어디에 있는 거지"에 답할 수 없다.
+concept_map = (ROOT / "runner" / "concept-map.md").read_text(encoding="utf-8")
+check("개념 지도가 커리큘럼임을 밝힌다", "커리큘럼" in concept_map,
+      "지도가 다시 학습 로그로 자란다")
+check("아직 안 배운 개념도 넣으라고 한다", "안 배운 개념도" in concept_map,
+      "미래 길목이 그래프에 안 서면 로드맵이 안 된다")
+# 지침 본문에서 뺐으므로 대본이 그 규칙을 갖고 있어야 한다.
+for rule in ("개념의 단위", "간선", "분야"):
+    check(f"대본이 `{rule}` 규칙을 갖고 있다", rule in concept_map,
+          "지침에서 뺀 규칙이 어디에도 없다")
+# `[설정]`이 아는 절은 트랙·분야·주제뿐이다 — 개념 지도를 거기 보내면 수집이 실패한다.
+check("개념 지도를 `[설정]`로 보내지 말라고 한다", "`[설정]` Issue로 보내지 마라" in concept_map,
+      "러너가 없는 설정 종류를 지어낸다")
 
 # 러너가 스스로 "내 지침이 낡았다"를 알아채는 경로. 지침 재붙여넣기는 자동화가 불가능한
 # 유일한 수동 작업이라, 아무도 안 알려 주면 옛 지침으로 몇 주씩 돈다.
