@@ -76,6 +76,18 @@ NEVER = (
 )
 
 
+# 없을 때만 만들어 주는 씨앗 파일 — **덮어쓰지는 않는다.**
+#
+# 2026-08-05: `subjects.yaml`·`tracks.yaml`은 학습자의 것이라 NEVER에 있는데, 그 탓에
+# **없을 때 만들어 주지도 않았다.** 그 파일들이 생기기 전에 만들어진 저장소는 영영 못
+# 받고, 러너는 세션 시작에 분야 목록을 못 읽어 이름을 매번 새로 지었다(파일럿에서
+# "회로 등가화·전자회로·전자회로 기초"가 각각 분야가 된 원인).
+#
+# 그래서 **create-only**로 연다: 없으면 템플릿의 빈 견본을 놓고, 있으면 절대 손대지 않는다.
+# NEVER의 뜻은 "덮어쓰지 마라"이지 "만들지도 마라"가 아니다.
+SEED_IF_MISSING = ("subjects.yaml", "tracks.yaml", "topics.yaml")
+
+
 WORKFLOW_DIR = ".github/workflows/"
 
 
@@ -115,9 +127,20 @@ def candidate_files(src_root):
     return sorted(set(out))
 
 
+def seed_files(src_root, dst_root):
+    """보호 파일 중 **없는 것만** — 있으면 절대 넣지 않는다(그건 학습자의 것이다)."""
+    out = []
+    for rel in SEED_IF_MISSING:
+        if os.path.isfile(os.path.join(src_root, rel)) and not os.path.exists(
+            os.path.join(dst_root, rel)
+        ):
+            out.append(rel)
+    return out
+
+
 def plan(src_root, dst_root):
     """(새로 생길 것, 내용이 다른 것) — 같은 파일은 어느 쪽에도 없다."""
-    added, changed = [], []
+    added, changed = seed_files(src_root, dst_root), []
     for rel in candidate_files(src_root):
         src, dst = os.path.join(src_root, rel), os.path.join(dst_root, rel)
         if not os.path.exists(dst):

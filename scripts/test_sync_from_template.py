@@ -139,4 +139,32 @@ print()
 if FAILED:
     print(f"실패 {len(FAILED)}개: " + ", ".join(FAILED))
     sys.exit(1)
+
+# ⑨ 씨앗 파일 — 없으면 만들고, 있으면 절대 건드리지 않는다 (2026-08-05)
+#    `subjects.yaml`은 NEVER에 있어 덮어쓰지 않지만, 그 탓에 **없을 때 만들어 주지도
+#    않았다.** 그 파일이 생기기 전에 만들어진 저장소는 영영 못 받았고, 러너는 분야
+#    목록을 못 읽어 이름을 매번 새로 지었다.
+print("\n⑨ 씨앗 파일 (create-only)")
+with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as dst:
+    os.makedirs(os.path.join(src, "scripts"), exist_ok=True)
+    with open(os.path.join(src, "subjects.yaml"), "w", encoding="utf-8") as f:
+        f.write("subjects: []\n")
+    with open(os.path.join(src, "tracks.yaml"), "w", encoding="utf-8") as f:
+        f.write("tracks: []\n")
+
+    added, changed = sync.plan(src, dst)
+    check("없으면 씨앗을 만든다", "subjects.yaml" in added and "tracks.yaml" in added,
+          str(added))
+
+    # 학습자가 이미 채워 둔 파일을 템플릿 견본으로 되돌리면 묶어 둔 분야가 통째로 날아간다.
+    with open(os.path.join(dst, "subjects.yaml"), "w", encoding="utf-8") as f:
+        f.write('subjects:\n  - name: "전자회로"\n')
+    added2, changed2 = sync.plan(src, dst)
+    check("이미 있으면 씨앗에 넣지 않는다", "subjects.yaml" not in added2, str(added2))
+    check("이미 있으면 갱신 대상도 아니다", "subjects.yaml" not in changed2, str(changed2))
+
+    sync.apply(src, dst, added2 + changed2)
+    kept = open(os.path.join(dst, "subjects.yaml"), encoding="utf-8").read()
+    check("학습자가 적은 분야가 살아남는다", "전자회로" in kept, kept)
+
 print("전부 통과 — 학습 기록은 어느 경로로도 덮이지 않는다")
