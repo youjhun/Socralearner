@@ -276,6 +276,23 @@ Fork를 쓰세요. 똑같이 동작합니다.
 **Q. GPT가 "권한이 없다" 같은 오류를 냅니다.**
 PAT 권한을 다시 보세요: **Contents=Read-only, Issues=Read and write**, 그리고 **Repository access에 내 repo가 선택**돼 있어야 합니다. 토큰을 새로 만들었다면 GPT의 Actions 인증값도 새 토큰으로 바꾸세요.
 
+**Q. 읽기는 되는데 Issue만 안 만들어집니다.** (`STATUS.md`는 읽어 오는데 "기록 실패"가 뜬다)
+증상이 그 자체로 답입니다 — **토큰은 살아 있고 저장소도 맞는데 `Issues` 권한만 모자란 것**입니다.
+읽기는 `Contents`, 기록은 `Issues`로 권한이 갈리기 때문입니다.
+
+1. GitHub → Settings → Developer settings → Personal access tokens → **Fine-grained tokens** → 내 토큰
+2. **Repository permissions → Issues**를 **`Read and write`** 로 바꿉니다 (`Read-only`면 이 증상이 납니다)
+3. 저장 후 **새 대화**에서 다시 시도합니다
+
+> 러너가 *"저장소를 못 읽은 것이 아니라 기록 액션 실행이 실패했다"*라고 말하면 바로 이
+> 경우입니다. 그때 러너가 함께 출력한 노트 본문은 **버리지 마세요** — 아래 Q의 방법으로
+> 직접 Issue에 붙여넣으면 자동화는 똑같이 돌아 파일을 만듭니다.
+
+**Q. 기록이 실패했는데 러너가 만든 내용은 살리고 싶습니다.**
+러너가 출력한 본문을 그대로 복사해 내 repo → **Issues → New issue** 에 붙여넣으세요.
+**제목만 규약을 지키면 됩니다** — `[학습] YYYY-MM-DD <slug> — <한 줄 제목>`.
+CI는 사람이 연 Issue와 러너가 연 Issue를 구별하지 않습니다.
+
 **Q. GPT가 그냥 답을 알려줘요.**
 "내가 먼저 설명할게, 답 먼저 주지 마"라고 하세요. 계속 그러면 Instructions가 제대로 안 붙은 겁니다(4-3 확인).
 
