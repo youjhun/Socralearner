@@ -45,7 +45,7 @@
 
 AI가 내 저장소를 읽고 기록을 남기려면 연결이 필요합니다. **토큰을 만들지 않습니다.**
 
-1. **[Topdown Learning App 설치 페이지](https://github.com/apps/topdown-learning)** 를 엽니다.
+1. **[Topdown Learning App 설치 페이지](https://github.com/apps/topdownlearning)** 를 엽니다.
    (열리지 않으면 관리자에게 설치 주소를 받으세요 — App 이름이 바뀌면 이 주소도 바뀝니다.)
 2. **Install** → **Only select repositories** → **1단계에서 만든 저장소 하나만** 선택.
 
