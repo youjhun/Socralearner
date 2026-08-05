@@ -48,11 +48,11 @@ jobs:
         startsWith(github.event.comment.body, '/기록')))
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Issue 본문 + 코멘트 회수
         id: fetch
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             const fs = require('fs');
@@ -111,7 +111,7 @@ jobs:
 
       - name: 결과를 Issue에 회신 (성공)
         if: success()
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             const fs = require('fs');
@@ -146,7 +146,7 @@ jobs:
 
       - name: 실패를 Issue에 회신 (조용한 실패 금지)
         if: failure()
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             const number = Number('${{ steps.fetch.outputs.number }}' || context.payload.issue?.number);

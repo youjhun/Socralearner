@@ -46,7 +46,7 @@ jobs:
     if: github.repository != 'youjhun/Socralearner'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           # PAT이 있으면 그것으로 체크아웃해야 뒤의 푸시도 같은 토큰으로 나간다.
           token: ${{ secrets.TEMPLATE_SYNC_TOKEN || github.token }}
