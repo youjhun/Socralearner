@@ -41,7 +41,7 @@
 
 ---
 
-## 3단계 — Socralearner 앱 설치 (2분)
+## 3단계 — Topdown Learning 앱 설치 (2분)
 
 AI가 내 저장소를 읽고 기록을 남기려면 연결이 필요합니다. **토큰을 만들지 않습니다.**
 
@@ -56,7 +56,7 @@ AI가 내 저장소를 읽고 기록을 남기려면 연결이 필요합니다. 
    **학습 세션이 실제로 쓰는 것은 Contents 읽기와 Issues 읽기/쓰기 둘뿐**이고, 세션 노트를
    파일로 만드는 것은 앱이 아니라 내 저장소 안에서 도는 자동화입니다.
 
-> ✅ **성공**: 내 repo → **Settings → GitHub Apps**에 Socralearner가 보인다.
+> ✅ **성공**: 내 repo → **Settings → GitHub Apps**에 Topdown Learning이 보인다.
 
 ### 이 연결, 위험하지 않나요?
 
@@ -69,7 +69,7 @@ AI가 내 저장소를 읽고 기록을 남기려면 연결이 필요합니다. 
 > **학습 세션(커넥터)이 쓰는 권한은 읽기와 Issue뿐입니다.** 세션 중에 코드가 고쳐지는 일은
 > 없습니다 — 파일을 만드는 것은 내 저장소의 자동화이고, 그 결과는 커밋 이력에 남습니다.
 
-연결은 언제든 **Settings → Applications → Socralearner → Revoke**로 끊을 수 있습니다.
+연결은 언제든 **Settings → Applications → Topdown Learning → Revoke**로 끊을 수 있습니다.
 끊으면 즉시 아무것도 읽지 못합니다.
 
 ---
@@ -80,13 +80,15 @@ AI가 내 저장소를 읽고 기록을 남기려면 연결이 필요합니다. 
 2. 커넥터 화면에서 **추가(Add)** → 서버 주소에 아래를 넣습니다:
 
    ```
-   https://<socralearner 주소>/api/mcp
+   https://topdown-one-eta.vercel.app/api/mcp
    ```
+
+   > 프리뷰 배포 주소(`topdown-...-hash.vercel.app`)를 넣지 마세요. 그 배포가 사라지면 연결이 끊깁니다.
 
 3. **연결(Connect)** 을 누르면 GitHub 승인 창이 뜹니다 → **승인**.
 4. 끝입니다. 붙여넣을 것도, 저장소 이름을 적을 곳도 없습니다 — 저장소는 3단계의 설치에서 옵니다.
 
-> ✅ **성공**: 커넥터 목록에 Socralearner가 있고, 도구 4개(`get_state` · `read_doc` · `get_paper` · `save_session`)가 보인다.
+> ✅ **성공**: 커넥터 목록에 연결이 보이고, 도구 4개(`get_state` · `read_doc` · `get_paper` · `save_session`)가 보인다.
 
 > **왜 도구가 4개뿐인가**: 예전에는 읽기 동작만 8개였습니다. AI가 그중 무엇을 부를지 고르다
 > 틀리면 오류가 났고, 오류가 반복되면 AI는 도구를 포기하고 **웹 검색으로 새거나** "읽기에
@@ -143,7 +145,7 @@ ChatGPT 새 대화에서:
 세션을 몇 번 쌓으면 **Topdown 앱**에서 내 저장소를 그대로 열 수 있습니다:
 
 ```
-https://<topdown 주소>/workspace/repo/내아이디/my-learning
+https://topdown-one-eta.vercel.app/workspace/repo/내아이디/my-learning
 ```
 
 | 탭 | 무엇이 보이나 | 어디서 오나 |
@@ -191,11 +193,11 @@ Fork를 쓰세요. 똑같이 동작합니다.
 
 **Q. 연결할 때 "학습 저장소를 한 개로 특정하지 못했다"고 나옵니다.**
 3단계에서 GitHub App을 **저장소 여러 개**에 설치한 것입니다.
-Settings → Applications → Socralearner → **Configure** → **Only select repositories** 에서
+Settings → Applications → Topdown Learning → **Configure** → **Only select repositories** 에서
 학습 저장소 **하나만** 남기고 다시 연결하세요.
 
 **Q. AI가 상태를 안 읽고 그냥 대답해요. / "상태를 붙여넣어 주세요"라고 합니다.**
-① 커넥터 목록에 Socralearner가 **연결됨**으로 보이는지 확인하세요.
+① 커넥터 목록에 **연결됨**으로 보이는지 확인하세요.
 ② 대화에서 커넥터가 **켜져 있는지** 확인하세요(대화창의 도구 아이콘).
 ③ 그래도 그러면 `get_state 불러줘`라고 한 번만 말해 보세요. 이후로는 알아서 부릅니다.
 
