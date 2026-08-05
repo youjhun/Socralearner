@@ -3,10 +3,10 @@ title: "연구 모드 — 읽은 것을 직접 돌려 확인하는 대본"
 kind: runner-mode
 ---
 
-# 연구 모드 (러너가 재현·실험 세션에서 `readRunnerFile`로 읽는 대본)
+# 연구 모드 (러너가 재현·실험 세션에서 `read_doc`으로 읽는 대본)
 
 > **이 파일은 GPT 지침 칸에 붙여넣지 않는다.** 재현·실험 세션이면 러너가
-> `readRunnerFile`(file=`research-mode.md`)로 읽어 그대로 따른다. 그래서 고쳐도 지침을
+> `read_doc`(path=`runner/research-mode.md`)로 읽어 그대로 따른다. 그래서 고쳐도 지침을
 > 다시 붙여넣을 필요가 없다(`template-sync`가 파일을 갱신한다).
 
 ## 무엇이 다른가

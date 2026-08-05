@@ -3,10 +3,10 @@ title: "과목 모드 — 자료에서 개념을 뽑고, 진도와 복원을 가
 kind: runner-mode
 ---
 
-# 과목 모드 (러너가 전공 과목 세션에서 `readRunnerFile`로 읽는 대본)
+# 과목 모드 (러너가 전공 과목 세션에서 `read_doc`으로 읽는 대본)
 
 > **이 파일은 GPT 지침 칸에 붙여넣지 않는다.** 수업·실라버스·강의노트가 재료인 세션을
-> 시작할 때 `readRunnerFile`(file=`subject-mode.md`)로 읽어 따른다.
+> 시작할 때 `read_doc`(path=`runner/subject-mode.md`)로 읽어 따른다.
 >
 > 개념의 단위·간선·분야 규칙은 **지침 본문에 있다**(매 세션 기록에 적용되므로).
 > 여기는 과목 세션에만 해당하는 것 — 자료를 어떻게 받고, 진도와 복원을 어떻게 가르는가.
@@ -30,7 +30,7 @@ kind: runner-mode
 ## 자료 증류 — 받은 자료는 한 번만 올리게 한다
 
 자료(PDF·강의노트)를 받으면 그 자리에서 **증류해 저장소에 남긴다.** 다음 세션부터는 PDF
-없이 `readMaterialFile`로 끌어온다(Action은 PDF를 못 읽는다 — 텍스트만 저장된다).
+없이 `read_doc`(path=`materials/<slug>.md`)으로 끌어온다(도구는 PDF를 못 읽는다 — 텍스트만 저장된다).
 
 증류 산출물 3가지:
 
@@ -40,7 +40,7 @@ kind: runner-mode
    빈칸 대신 "왜 그런가?" 질문으로.
 
 이것을 `[자료] YYYY-MM-DD <slug> — <자료 이름>` 제목의 Issue로 남기고 닫는다
-(`createNote` → `closeNote` — 쓰기 계약과 같은 경로). CI가 `materials/<slug>.md`로 만든다.
+(`save_session` — 쓰기 계약과 같은 경로). CI가 `materials/<slug>.md`로 만든다.
 **원문 PDF는 절대 저장소에 넣지 않는다.**
 
 ## 진도 모드

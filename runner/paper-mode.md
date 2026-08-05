@@ -3,10 +3,10 @@ title: "논문 모드 — 설명·검증·분리·시각화·기록 루프"
 kind: runner-mode
 ---
 
-# 논문 모드 (러너가 논문 세션에서 `readRunnerFile`로 읽는 대본)
+# 논문 모드 (러너가 논문 세션에서 `read_doc`으로 읽는 대본)
 
 > **이 파일은 GPT 지침 칸에 붙여넣지 않는다.** 러너가 논문 세션을 시작할 때
-> `readRunnerFile`(file=`paper-mode.md`)로 읽어 그대로 따른다. 그래서 이 대본은 길이 제한이
+> `read_doc`(path=`runner/paper-mode.md`)로 읽어 그대로 따른다. 그래서 이 대본은 길이 제한이
 > 없고, 고쳐도 **지침을 다시 붙여넣을 필요가 없다**(`template-sync`가 파일을 갱신한다).
 >
 > 이 루프는 논문을 대신 요약해 주는 것이 아니다. **사용자가 먼저 설명하고, 러너가 그
@@ -42,11 +42,10 @@ READING_STATUS 복원 → 원문 해당 구간 → 사용자가 자기 말로 �
 
 매번 처음부터 다시 읽지 않는 것이 이 단계의 전부다. 순서대로 읽는다:
 
-1. `readPapersFile`(file=`READING_STATUS.md`) — 지금 어느 논문, 어디까지, 다음 시작점.
-2. `readPaperFile`(slug, file=`meta.yaml`) — 서지 정보와 **현재 이해 단계**.
-3. `readPaperFile`(slug, file=`paper.md`) — 지금까지 **검증된** 이해(정제본).
-4. `readPaperFile`(slug, file=`parking-lot.md`) — 미뤄 둔 선수지식. 오늘 절에 꼭 필요한 항목이 있으면 여기서 꺼낸다.
-   slug를 모르면 지어내지 말고 `listPapers`로 실제 폴더 이름을 확인한다.
+1. `get_state`(mode: `paper`) — 읽는 중인 논문 목록(`papers`)과 상태가 함께 온다. **slug를 지어내지 마라.**
+2. `get_paper`(slug) — 한 번에 온다: `meta`(서지·현재 단계) · `paper`(검증된 이해=정제본) ·
+   `annotations` · `readingStatus`(지금 어느 논문, 어디까지, 다음 시작점).
+3. 미뤄 둔 선수지식은 패킷의 `parkingLot`에 있다. 오늘 절에 꼭 필요한 항목이 있으면 여기서 꺼낸다.
 5. 원문의 해당 구간(사용자가 파일·링크로 준 것).
 
 그리고 **지난 세션의 이해를 한 문단으로 복원해 보여준다.** 사용자가 "맞다/아니다"를
@@ -134,8 +133,8 @@ Parking Lot 항목은 나중에 **별도 학습 세션의 재료**가 된다(`[�
 
 ## 8. 기록 — 세션 시작에 열고 오갈 때마다 붙인다
 
-지침 본문의 쓰기 계약과 **같다**: 첫 응답 직후 `createNote`, 오갈 때마다 `appendNote`,
-`closeNote`는 마감일 뿐이다. 제목만 다르다:
+지침 본문의 쓰기 계약과 **같다**: 첫 응답 직후 `save_session(more: true)`, 오갈 때마다 continuationToken으로 이어 쓰고,
+마감은 `more` 없이 한 번. 다른 점은 `mode`와 `paperSlug`뿐이다:
 
 ```
 [논문] <paper-slug> — <섹션>
