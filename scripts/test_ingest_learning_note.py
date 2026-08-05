@@ -381,6 +381,57 @@ remove: true
         finally:
             os.chdir(cwd)
 
+    # `[설정]` → subjects.yaml (2026-08-05)
+    # 러너가 개념 지도 소제목을 매번 새로 지어 같은 것이 여러 조각으로 갈라졌다
+    # (파일럿: "회로 등가화 6 · 전자회로 5 · 전자회로 기초 4"). 합치는 표는
+    # build_concepts가 이미 읽는데 **채울 쓰기 경로가 없었다.**
+    print("\n분야 묶기")
+    SUBJECT_BODY = """## 분야
+
+### 전자회로
+- 회로 등가화
+- 전자회로 기초
+
+### 신호처리
+"""
+    subj_issue = {"number": 70, "title": "[설정] subjects", "body": SUBJECT_BODY, "comments": []}
+    subjects = ingest.build_subjects(subj_issue)
+    check("대표 이름과 별칭이 갈린다",
+          subjects[0]["name"] == "전자회로" and "회로 등가화" in subjects[0]["aliases"],
+          str(subjects[0]))
+    check("별칭 없는 분야도 유효하다",
+          any(s["name"] == "신호처리" for s in subjects), str(subjects))
+    check("`## 분야` Issue는 트랙·주제로 새지 않는다",
+          ingest.build_tracks(subj_issue) == [] and ingest.build_topics(subj_issue) == [])
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "subjects.yaml")
+        ingest.merge_subjects(subjects, path=path)
+        # 별칭은 합집합이다 — 이번에 안 적은 것을 지우면 지난번 묶음이 다시 갈라진다.
+        added, updated, removed = ingest.merge_subjects(
+            [{"name": "전자회로", "aliases": ["회로이론"]}], path=path)
+        out = open(path, encoding="utf-8").read()
+        check("새 별칭이 더해진다", "회로이론" in out and updated == ["전자회로"], out)
+        check("지난 별칭이 살아남는다", "회로 등가화" in out and "전자회로 기초" in out, out)
+        check("안 적은 분야는 남는다", "신호처리" in out, out)
+        check("주석이 살아남는다", out.lstrip().startswith("#"), out[:80])
+
+        # build_concepts가 이 출력을 실제로 읽어 합쳐야 의미가 있다(CI 왕복 계약).
+        cwd2 = os.getcwd()
+        try:
+            os.chdir(tmp)
+            sys.path.insert(0, os.path.join(cwd2, "scripts"))
+            import build_concepts  # noqa: E402
+            alias = build_concepts.load_subjects()
+            merged, n = build_concepts.normalize_domains(
+                {"테브난": "회로 등가화", "노턴": "전자회로 기초", "푸리에": "신호처리"}, alias)
+            check("그래프 빌더가 실제로 합친다",
+                  merged["테브난"] == "전자회로" and merged["노턴"] == "전자회로" and n == 2,
+                  str(merged))
+            check("다른 분야는 안 건드린다", merged["푸리에"] == "신호처리", str(merged))
+        finally:
+            os.chdir(cwd2)
+
     # `지금 약한 것`은 교체가 아니라 누적 (2026-08-05)
     # 이번 세션에서 안 다룬 약점이 지워지면 러너는 그것을 다시 만나지 못한다.
     print("\n약점 누적")

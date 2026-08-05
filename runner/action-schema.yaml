@@ -44,7 +44,7 @@ paths:
   /repos/{owner}/{repo}/contents/{file}:
     get:
       operationId: readFile
-      summary: 저장소 **루트** 파일을 평문으로 읽는다 (STATUS.md · mastery.md · drills.md · topics.yaml · concepts.json)
+      summary: 저장소 **루트** 파일을 평문으로 읽는다 (STATUS.md · mastery.md · drills.md · topics.yaml · tracks.yaml · CHANGELOG.md · concepts.json)
       description: >-
         루트 파일 전용이다. 하위 폴더는 폴더별 액션을 쓴다 —
         runner/ → readRunnerFile, papers/ → readPapersFile,
@@ -57,7 +57,7 @@ paths:
         - name: file
           in: path
           required: true
-          description: "루트 파일 이름. 슬래시를 넣지 마라. 예: STATUS.md"
+          description: "루트 파일 이름. 슬래시를 넣지 마라. 예: STATUS.md · tracks.yaml · CHANGELOG.md"
           schema: { type: string }
         - name: Accept
           in: header
