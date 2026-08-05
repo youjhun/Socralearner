@@ -77,6 +77,19 @@ STATUS_DERIVED = [
     ("다음 복습 질문", "다음 복습 질문", 5),
 ]
 
+# 2026-08-05: `지금 약한 것`은 **교체가 아니라 누적**이다.
+#
+# 그 전에는 `apply_section_patch`가 절 본문을 통째로 갈아 끼웠다. 그래서 이번 세션에서
+# 다루지 않은 약점은 조용히 사라졌고, 러너는 다음 세션에 그것을 다시 만나지 못했다 —
+# STATUS.md는 러너가 세션 시작에 읽는 유일한 파일이라, 여기서 지워지면 영영 안 돌아온다.
+# (파일럿 저장소에서 KCL·KVL이 `암기`로 남은 채 테브난만 두 세션 연속으로 돌았다.)
+#
+# 약점은 "이번 세션에서 나온 것"이 아니라 **"아직 안 풀린 것"**이다. 새 것을 앞에 놓고
+# 이어 붙이되 상한을 둔다 — 무한정 쌓이면 이 파일이 커져 러너가 매 세션 통째로 읽는
+# 비용이 오른다(작게 유지하는 것이 이 파일의 존재 이유다). 상한 밖으로 밀려난 것은
+# `mastery.md`에 남아 있으므로 사라지는 것이 아니다.
+STATUS_ACCUMULATED = {"지금 약한 것": 5}
+
 TRAJECTORY_SECTION = "최근 궤적"
 # 최근 궤적은 교체가 아니라 누적이다. 무한정 쌓으면 STATUS.md가 커져 러너가 매 세션
 # 통째로 읽는 비용이 오르므로(이 파일의 존재 이유가 "작게 유지"다) 최근 것만 남긴다.
@@ -632,6 +645,38 @@ def write_mastery_fragment(section, track, date, slug, note_path):
     return path
 
 
+def _entry_text(line):
+    """`1. 항목` · `- 항목` → `항목`. 번호는 자리일 뿐이라 같은 항목의 판단에서 뺀다."""
+    return re.sub(r"^\s*(?:\d+[.)]|[-*])\s*", "", line).strip()
+
+
+def merge_entries(old_lines, content, cap):
+    """새 항목을 앞에, 아직 남은 옛 항목을 뒤에 — 중복 없이 `cap`개까지.
+
+    자리표시자(`(첫 세션의 스캔에서 채워진다)` 같은 괄호 한 줄)는 실제 항목이 들어오면
+    사라져야 한다. 안내용 인용(`>`)은 호출부가 이미 따로 보존한다.
+    """
+    fresh, seen = [], set()
+    for line in content.splitlines():
+        text = _entry_text(line)
+        if text and text not in seen:
+            seen.add(text)
+            fresh.append(text)
+
+    for line in old_lines:
+        if line.lstrip().startswith(">") or not line.strip():
+            continue
+        text = _entry_text(line)
+        if not text or text in seen:
+            continue
+        if text.startswith("(") and text.endswith(")"):
+            continue
+        seen.add(text)
+        fresh.append(text)
+
+    return "\n".join(f"{i}. {t}" for i, t in enumerate(fresh[:cap], 1))
+
+
 def apply_section_patch(patch, today, path=STATUS_PATH):
     """`## ` 절 본문을 통째로 교체한다 — 안내용 인용(>)줄은 보존.
 
@@ -668,7 +713,10 @@ def apply_section_patch(patch, today, path=STATUS_PATH):
         while keep and keep[-1].strip() == "":
             keep.pop()
 
-        lines[idx + 1:end] = (keep or [""]) + [content, ""]
+        cap = STATUS_ACCUMULATED.get(section)
+        body = merge_entries(lines[idx + 1:end], content, cap) if cap else content
+
+        lines[idx + 1:end] = (keep or [""]) + [body, ""]
         applied.append(section)
 
     if applied:

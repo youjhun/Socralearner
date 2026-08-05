@@ -163,9 +163,12 @@ def _daily_notes(dirs=DAILY_DIR):
     근거 수집에는 daily만 넘긴다 — 증류 자료는 사용자가 스스로 설명한 증거가 아니고,
     그 문장이 근거로 붙으면 `is_example_note`가 막으려는 것과 같은 자기기만이 된다.
     """
+    # 2026-08-05: `**/*.md`로 넓혔다. 트랙 서랍(`daily/<track>/`)이 생기면서 한 층만
+    # 보던 이 glob이 **트랙에 담긴 노트를 통째로 못 보게** 됐다. 노트는 쌓이는데
+    # 그래프만 비어 가는 실패라, 조용하고 알아채기 어렵다.
     paths = []
     for d in ([dirs] if isinstance(dirs, str) else dirs):
-        paths.extend(glob.glob(os.path.join(d, "*.md")))
+        paths.extend(glob.glob(os.path.join(d, "**", "*.md"), recursive=True))
     for path in sorted(paths):
         with open(path, encoding="utf-8") as f:
             text = f.read()
@@ -401,7 +404,8 @@ def build(mastery, edges, domain_of, sources):
         # 원장의 증거 칸에 적힌 daily 링크도 근거로 친다(인용문 없이 파일만).
         collected = list(sources.get(lb, []))
         seen = {(s["file"], s["match"]) for s in collected}
-        for m in re.finditer(r"[\w./-]*daily/[\w.\-가-힣]+\.md", info.get("evidence", "")):
+        # 경로에 `/`를 허용한다 — 트랙 서랍이 생기며 증거가 `daily/<track>/…md`가 됐다.
+        for m in re.finditer(r"[\w./-]*daily/[\w./\-가-힣]+\.md", info.get("evidence", "")):
             if (m.group(0), "") not in seen:
                 collected.append({"file": m.group(0), "kind": "원장", "match": ""})
         entry = {

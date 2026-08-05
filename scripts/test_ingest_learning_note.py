@@ -367,8 +367,71 @@ remove: true
                 f.write("---\nsource_issue: 7\n---\n")
             check("옛 노트를 다시 수집하면 같은 파일에 덮어쓴다",
                   ingest.target_path("2026-08-04", "old", 7, "electronics") == old)
+
+            # 노트는 쌓이는데 그래프만 비어 가는 실패를 막는다 — 조용해서 알아채기 어렵다.
+            with open(os.path.join("daily", "electronics", "2026-08-05-n.md"),
+                      "w", encoding="utf-8") as f:
+                f.write("---\nsource_issue: 8\n---\n# 트랙 노트\n")
+            sys.path.insert(0, os.path.join(cwd, "scripts"))
+            import build_concepts  # noqa: E402
+            found = [p for p, _ in build_concepts._daily_notes("daily")]
+            check("개념 빌더가 서랍 안을 본다",
+                  os.path.join("daily", "electronics", "2026-08-05-n.md") in found, str(found))
+            check("개념 빌더가 평평한 노트도 그대로 본다", old in found, str(found))
         finally:
             os.chdir(cwd)
+
+    # `지금 약한 것`은 교체가 아니라 누적 (2026-08-05)
+    # 이번 세션에서 안 다룬 약점이 지워지면 러너는 그것을 다시 만나지 못한다.
+    print("\n약점 누적")
+    STATUS_TEMPLATE = """---
+updated: 2026-08-02
+---
+## 지금 약한 것 (top 5 — 세션은 여기서 시작)
+> 전체는 [[mastery.md]]. 아직 `설명가능`이 아닌 것부터.
+- (첫 세션의 스캔에서 채워진다)
+
+## 다음 복습 질문
+1.
+"""
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "STATUS.md")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(STATUS_TEMPLATE)
+
+        ingest.apply_section_patch({"지금 약한 것": "1. KCL 근거\n2. KVL 순에너지"},
+                                   "2026-08-03", path=path)
+        out = open(path, encoding="utf-8").read()
+        check("자리표시자는 실제 항목이 들어오면 사라진다", "첫 세션의 스캔" not in out, out)
+        check("안내용 인용은 남는다", "전체는 [[mastery.md]]" in out, out)
+
+        # 다음 세션이 전혀 다른 주제를 다뤄도 지난 약점은 남아 있어야 한다.
+        ingest.apply_section_patch({"지금 약한 것": "1. Rth 계산 순서\n2. Norton 변환"},
+                                   "2026-08-04", path=path)
+        out = open(path, encoding="utf-8").read()
+        check("지난 약점이 살아남는다", "KCL 근거" in out and "KVL 순에너지" in out, out)
+        check("새 약점이 앞에 온다", out.index("Rth 계산 순서") < out.index("KCL 근거"), out)
+
+        ingest.apply_section_patch({"지금 약한 것": "1. KCL 근거"}, "2026-08-05", path=path)
+        out = open(path, encoding="utf-8").read()
+        check("같은 약점이 중복되지 않는다", out.count("KCL 근거") == 1, out)
+
+        # 상한이 없으면 STATUS.md가 커져 러너가 매 세션 통째로 읽는 비용이 오른다.
+        ingest.apply_section_patch(
+            {"지금 약한 것": "\n".join(f"{i}. 새 약점 {i}" for i in range(1, 8))},
+            "2026-08-06", path=path)
+        section = open(path, encoding="utf-8").read().split("## 지금 약한 것")[1].split("##")[0]
+        check("상한 5개를 넘지 않는다",
+              len([l for l in section.splitlines() if l.strip()[:2].rstrip(".").isdigit()]) == 5,
+              section)
+
+        # 다른 절은 예전대로 교체여야 한다 — 복습 질문은 그 세션이 고른 것이다.
+        ingest.apply_section_patch({"다음 복습 질문": "1. 왜 Open Circuit인가"},
+                                   "2026-08-06", path=path)
+        ingest.apply_section_patch({"다음 복습 질문": "1. 왜 Short Circuit인가"},
+                                   "2026-08-07", path=path)
+        check("복습 질문은 여전히 교체된다",
+              "왜 Open Circuit인가" not in open(path, encoding="utf-8").read())
 
     print()
     if FAILED:
