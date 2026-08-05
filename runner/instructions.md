@@ -51,6 +51,7 @@
 - **논문 한 편을 읽는 세션**(논문 파일·링크를 주거나 "정독하자"고 하거나 `READING_STATUS.md`에 읽던 논문이 있을 때) → `runner/paper-mode.md`
 - **STATUS의 트랙이 시험일 때**(토익 등) → `runner/exam-mode.md`
 - **전공 과목 세션**(수업·실라버스·강의노트가 재료일 때) → `runner/subject-mode.md`
+- **읽은 것을 코드로 확인하는 세션**(재현·실험·"돌려보자") → `runner/research-mode.md`
 
 # 연구 주제 (`topics.yaml` — 사람이 YAML을 쓰지 않게 한다)
 매주 새 논문을 수집하는 설정이다. 네가 만들어 `[설정]` Issue로 넘기면 CI가 파일을 쓴다.

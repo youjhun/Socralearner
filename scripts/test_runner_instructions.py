@@ -29,7 +29,7 @@ BUDGET = 7000       # 우리 예산 — 남는 1,000자는 `# 이 학습자` 블
 # 모드 대본은 지침 박스가 아니라 저장소 파일이다(러너가 readFile로 읽는다).
 # 그래서 길이 예산을 먹지 않고, 고쳐도 지침을 다시 붙여넣지 않아도 된다.
 MODES = ("runner/paper-mode.md", "runner/exam-mode.md", "runner/topics.md",
-         "runner/subject-mode.md")
+         "runner/subject-mode.md", "runner/research-mode.md")
 
 # CI(scripts/ingest_learning_note.py 등)가 이 이름으로 노트를 읽는다.
 # 하나라도 사라지면 그 절은 영영 파일로 만들어지지 않는다.
@@ -104,6 +104,15 @@ check("논문 모드의 절 이름이 전부 살아 있다", not missing, f"사�
 subject_mode = (ROOT / "runner" / "subject-mode.md").read_text(encoding="utf-8")
 check("과목 모드가 `[자료]` 증류 규약을 갖고 있다", "[자료]" in subject_mode,
       "증류 Issue 규약이 사라지면 materials/가 영영 안 만들어진다")
+
+# 연구 모드는 새 Issue 종류를 만들지 않는다 — 기존 `[학습]` + `artifact:`를 쓴다.
+# 여기서 새 접두어를 지어내면 CI 게이트가 모르는 Issue가 되어 조용히 사라진다.
+research_mode = (ROOT / "runner" / "research-mode.md").read_text(encoding="utf-8")
+check("연구 모드가 기존 쓰기 계약을 쓴다",
+      "artifact:" in research_mode and "[학습]" in research_mode,
+      "새 Issue 접두어를 만들면 CI가 못 받는다")
+check("연구 모드가 반증 조건을 요구한다", "반증 조건" in research_mode,
+      "반증 조건이 없으면 무엇이 나와도 '맞았다'가 된다")
 
 # ── Action 스키마 ─────────────────────────────────────────────────────────
 #
