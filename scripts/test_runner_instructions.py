@@ -51,12 +51,13 @@ CONTRACT = (
     "## 개념 지도",
     "## 드릴 항목",
     "## 이해도 승급",
-    "[학습]",
-    "[설정]",
-    "createNote",
-    "appendNote",
-    "closeNote",
-    "readFile",
+    # 2026-08-05: 액션 3홉(createNote/appendNote/closeNote)과 읽기 8종이 MCP 도구
+    # 2개로 바뀌었다. 제목 접두어(`[학습]`·`[설정]`)는 이제 **서버가** 붙이므로 지침에서
+    # 사라졌고, 대신 지침이 부르는 도구 이름이 계약이다.
+    "get_state",
+    "read_doc",
+    "save_session",
+    "continuationToken",
     "artifact:",
 )
 
@@ -142,8 +143,14 @@ check("못 쓴다고 답하지 말라고 못박는다", '"못 쓴다"고 답하�
       "러너가 기록을 포기하고 사용자에게 손으로 옮기라고 한다")
 # 러너가 액션을 파이썬으로 import하려다 실패하고 웹 검색으로 갈아탄 사고(2026-08-05).
 # 검색 결과는 이 학습자의 기록이 아니라, 그렇게 진행하면 남의 내용으로 세션이 돈다.
-check("액션을 코드로 부르지 말라고 못박는다", "코드 인터프리터" in base,
-      "러너가 액션을 파이썬에서 import하려 한다")
+check("도구를 코드로 부르지 말라고 못박는다", "코드 인터프리터" in base,
+      "러너가 도구를 파이썬에서 import하려 한다")
+# 2026-08-05: 없는 파일이 404로 보이면 러너가 도구를 포기하고 웹으로 샜다.
+# 이제 `missing`으로 오므로, 지침이 그 구분을 말해야 한다.
+check("없음과 실패를 구분하라고 말한다", "missing" in base,
+      "러너가 빈 저장소를 '읽기 실패'로 보고 웹 검색으로 간다")
+check("상태를 붙여넣어 달라고 하지 말라고 못박는다", "붙여넣어 달라고 요청하지 마라" in base,
+      "러너가 사용자에게 STATUS를 손으로 넣게 시킨다")
 check("실패해도 웹 검색으로 갈아타지 말라고 한다", "웹 검색으로 갈아타지" in base,
       "검색 결과가 학습자의 기록 행세를 한다")
 
@@ -174,14 +181,18 @@ if SCHEMA.exists():
     bad = [p for p in paths if re.search(r"\{[^}]*(path|filepath|full)[^}]*\}", p)]
     check("슬래시를 품는 경로 파라미터가 없다", not bad, f"{bad} — 폴더를 URL에 고정해라")
 
-    # 지침·대본이 부르는 액션 이름이 스키마에 실제로 있어야 한다.
-    op_ids = set(re.findall(r"operationId:\s*(\w+)", body))
-    referenced = set()
-    for rel in ("runner/instructions.md", *MODES):
-        text = (ROOT / rel).read_text(encoding="utf-8")
-        referenced |= {m for m in re.findall(r"`(read\w+|listPapers|createNote|appendNote|closeNote)`", text)}
-    missing_ops = sorted(referenced - op_ids)
-    check("지침이 부르는 액션이 스키마에 전부 있다", not missing_ops, f"없는 것: {missing_ops}")
+    check("옛 스키마에 폐기 표시가 있다", "폐기 예정" in schema_text,
+          "새 사용자가 폐기된 경로를 따라간다")
+
+# 지침·대본이 부르는 도구 이름이 실제 MCP 도구여야 한다. 없는 이름을 부르면 러너는
+# 도구가 고장난 줄 알고 웹 검색으로 간다 — 옛 404 사고와 같은 결말이다.
+MCP_TOOLS = {"get_state", "read_doc", "get_paper", "save_session"}
+referenced = set()
+for rel in ("runner/instructions.md", *MODES):
+    text = (ROOT / rel).read_text(encoding="utf-8")
+    referenced |= {m for m in re.findall(r"`(get_state|read_doc|get_paper|save_session|readFile|readRunnerFile|readPapersFile|readPaperFile|readDailyFile|readTrackDaily|readMaterialFile|listPapers|createNote|appendNote|closeNote)`", text)}
+unknown = sorted(referenced - MCP_TOOLS)
+check("지침이 부르는 도구가 전부 실재한다", not unknown, f"없는 도구: {unknown}")
 
 if ADDENDUM.exists():
     text = ADDENDUM.read_text(encoding="utf-8")
