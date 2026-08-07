@@ -484,6 +484,51 @@ updated: 2026-08-02
         check("복습 질문은 여전히 교체된다",
               "왜 Open Circuit인가" not in open(path, encoding="utf-8").read())
 
+    # ── 지식 그래프 손보기 (`## 지도` → concepts-overrides.yaml) ──────────────
+    #
+    # 노드는 daily 노트에서 매번 다시 만들어지므로 진짜 "삭제"는 노트를 고치는 일이 된다.
+    # 그건 기록을 거짓으로 만들기 때문에, 지도 위에 덮는 파일만 쓴다. 그 계약을 여기서 지킨다.
+    import tempfile
+    cwd = os.getcwd()
+    with tempfile.TemporaryDirectory() as tmp:
+        try:
+            os.chdir(tmp)
+            issue = {"title": "[설정] 지도 정리", "body": (
+                "## 지도\n"
+                "### 감추기\n- 오늘 한 것\n- TODO\n"
+                "### 이름 합치기\n- Fréchet 평균 → Fréchet mean\n- 옛 이름 -> 새 이름\n"
+            )}
+            got = ingest.build_overrides(issue)
+            check("감출 이름을 읽는다", got["hidden"] == ["오늘 한 것", "TODO"], got)
+            check("화살표는 → 와 -> 를 모두 받는다",
+                  got["renamed"] == [
+                      {"from": "Fréchet 평균", "to": "Fréchet mean"},
+                      {"from": "옛 이름", "to": "새 이름"},
+                  ], got)
+
+            ingest.merge_overrides(got)
+            text = open(ingest.OVERRIDES_PATH, encoding="utf-8").read()
+            check("파일에 감춘 이름이 적힌다", "오늘 한 것" in text, text)
+
+            # 두 번 와도 같은 항목이 쌓이지 않는다 — Issue는 재실행될 수 있다.
+            again = ingest.merge_overrides(got)
+            check("같은 것을 다시 보내도 늘지 않는다", again == ([], []), again)
+
+            # 이 파일은 여러 세션에 걸쳐 자란다. 이번에 안 적은 것을 지우면 지난번에
+            # 감춘 노드가 슬그머니 되살아난다.
+            added_h, _ = ingest.merge_overrides({"hidden": ["새로 감출 것"], "renamed": []})
+            text = open(ingest.OVERRIDES_PATH, encoding="utf-8").read()
+            check("먼저 감춘 것은 그대로 남는다", "오늘 한 것" in text and added_h == ["새로 감출 것"], text)
+
+            _, added_r = ingest.merge_overrides({"hidden": [], "renamed": [{"from": "A", "to": "A"}]})
+            check("자기 자신으로 바꾸기는 받지 않는다", added_r == [], added_r)
+
+            check("지도 절이 없으면 아무것도 안 한다",
+                  ingest.build_overrides({"title": "[설정] x", "body": "## 주제\n- 아무거나"}) == {},
+                  "")
+        finally:
+            os.chdir(cwd)
+
     print()
     if FAILED:
         print(f"❌ 실패 {len(FAILED)}: " + ", ".join(FAILED))

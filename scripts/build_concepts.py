@@ -33,6 +33,7 @@ DRILLS = "drills.md"
 OUT = "concepts.json"
 SECTION = "개념 지도"
 SUBJECTS_PATH = "subjects.yaml"
+OVERRIDES_PATH = "concepts-overrides.yaml"
 
 # ─────────────────────────── 개념 vs 항목 (2층 구조) ───────────────────────────
 #
@@ -428,6 +429,85 @@ def build(mastery, edges, domain_of, sources):
     return {"concepts": concepts, "drills": drills}
 
 
+# ───────────────── 지도 손보기 (concepts-overrides.yaml) ─────────────────
+#
+# 2026-08-07 (유지훈): *"이런 노드 중에서 사용자가 필요없다고 생각되면 바로 삭제하거나
+# 이름 수정할 수 있도록 해야할 듯."*
+#
+# 노드는 어디에도 저장돼 있지 않다 — 매 빌드마다 daily 노트의 `## 개념 지도`에서 다시
+# 만들어진다. 그래서 진짜 "삭제"는 과거 세션 노트를 고치는 일이 되는데, 그건 하지 않는다:
+# 이 저장소의 주장이 "기록이 곧 증거"라서, 지도가 지저분하다고 그날 한 말을 지우면
+# 증거가 거짓이 된다. 대신 **지도 위에 얇게 덮는다.**
+#
+# 되돌릴 수 있다는 것이 이 설계의 값이다 — overrides 한 줄을 지우면 노드가 그대로 돌아온다.
+
+
+def load_overrides(path=None):
+    """concepts-overrides.yaml → (감출 이름 집합, {옛 이름(정규화): 새 이름})."""
+    path = path or OVERRIDES_PATH
+    if not os.path.exists(path):
+        return set(), {}
+    try:
+        import yaml  # type: ignore
+        with open(path, encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+    except Exception:
+        # 파일이 깨졌다고 그래프를 통째로 잃지 않는다 — 손보기는 곁다리다.
+        return set(), {}
+
+    hidden = {str(h).strip() for h in (data.get("hidden") or []) if str(h).strip()}
+    renamed = {}
+    for entry in (data.get("renamed") or []):
+        if not isinstance(entry, dict):
+            continue
+        src = str(entry.get("from") or "").strip()
+        dst = str(entry.get("to") or "").strip()
+        # 자기 자신으로의 이름 바꾸기는 무한 루프의 씨앗이라 애초에 받지 않는다.
+        if src and dst and _fold(src) != _fold(dst):
+            renamed[_fold(src)] = dst
+    return hidden, renamed
+
+
+def apply_overrides(edges, domain_of, mastery, hidden, renamed):
+    """이름 합치기 → 감추기. **이 순서여야 한다** — 옛 이름으로 감춘 것도 잡아야 한다.
+
+    감출 때는 그 노드에 걸린 선수관계도 함께 뺀다. 안 그러면 그래프에 이름 없는 점이
+    남는다(엣지가 가리키는 노드가 없으면 화면은 id를 그대로 그린다).
+    """
+    def rename(label):
+        return renamed.get(_fold(label), label)
+
+    hidden_folded = {_fold(h) for h in hidden} | {_fold(rename(h)) for h in hidden}
+
+    def is_hidden(label):
+        return _fold(label) in hidden_folded
+
+    new_edges = []
+    for target, prereq in edges:
+        t, p = rename(target), rename(prereq)
+        if is_hidden(t) or is_hidden(p) or t == p:
+            continue
+        if (t, p) not in new_edges:
+            new_edges.append((t, p))
+
+    new_domain = {}
+    for label, domain in domain_of.items():
+        lb = rename(label)
+        if not is_hidden(lb):
+            new_domain[lb] = domain
+
+    # 원장은 마지막 명시가 이긴다 — 합쳐질 때 새 이름 쪽 기록을 남긴다.
+    new_mastery = {}
+    for label, info in mastery.items():
+        lb = rename(label)
+        if is_hidden(lb):
+            continue
+        new_mastery[lb] = {**new_mastery.get(lb, {}), **info}
+
+    n_hidden = len(mastery) + len(domain_of) - len(new_mastery) - len(new_domain)
+    return new_edges, new_domain, new_mastery, max(n_hidden, 0)
+
+
 # ────────────────────────── 분야 정규화 (subjects.yaml) ──────────────────────────
 #
 # 2026-08-04: 같은 과목이 여러 분야로 쪼개지는 것이 발견됐다 — 한 학습자의 그래프에서
@@ -516,6 +596,22 @@ def main():
         labels.add(p)
     sources = collect_sources(sorted(labels))
 
+    # 지도 손보기 — 사용자가 감추거나 이름을 합친 것. 분야 정규화보다 **먼저** 한다:
+    # 감춘 개념까지 분야를 채우고 이웃에 전파하면, 지운 것이 지도에 자국을 남긴다.
+    hidden, renamed = load_overrides()
+    if hidden or renamed:
+        edges, domain_of, mastery, n_dropped = apply_overrides(
+            edges, domain_of, mastery, hidden, renamed
+        )
+        labels = set(mastery.keys())
+        for t, p in edges:
+            labels.add(t)
+            labels.add(p)
+        labels |= set(domain_of)
+        sources = collect_sources(sorted(labels))
+    else:
+        n_dropped = 0
+
     # 분야 정규화 — 별칭 합치기 → 미분류 전파. 둘 다 안전 기본값(못 정하면 안 바꾼다).
     domain_of, n_merged = normalize_domains(domain_of, load_subjects())
     domain_of, n_filled = propagate_domains(domain_of, edges, labels | set(domain_of))
@@ -549,6 +645,11 @@ def main():
         print("      남기면 다음 빌드에서 개념으로 돌아온다(위계에 참여하면 항상 개념이다).")
     if n_edges == 0:
         print("   ℹ️  선수관계가 아직 없다. 세션에서 러너가 `## 개념 지도`에 `A ← B` 를 남기면 쌓인다.")
+    if n_dropped or renamed:
+        print(
+            f"   ✂️  지도 손보기 — 감춘 개념 {n_dropped}개 · 이름 합치기 {len(renamed)}건 "
+            "(concepts-overrides.yaml). 노트와 원장은 그대로다."
+        )
     if n_merged:
         print(f"   🔗 분야 별칭 {n_merged}건을 subjects.yaml의 대표 이름으로 합쳤다.")
     if n_filled:
