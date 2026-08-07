@@ -187,6 +187,12 @@ TRACK_FIELDS = ("label", "mode", "goal")
 # 대주제 묶음은 **사람이 한다**(유지훈 2026-08-05) — 러너가 마음대로 합치면 학습자가
 # 일부러 나눠 둔 것까지 뭉갠다.
 SUBJECTS_PATH = "subjects.yaml"
+
+# 2026-08-07: 지식 그래프에서 노드를 감추거나 이름을 합치는 곳. 노드는 daily 노트에서
+# 매번 다시 만들어지므로 "삭제"는 노트를 고치는 일이 되는데, 그건 기록을 거짓으로 만든다.
+# 그래서 지도 위에 얇게 덮는다 — 되돌리려면 이 파일에서 한 줄 지우면 된다.
+OVERRIDES_PATH = "concepts-overrides.yaml"
+OVERRIDES_SECTION = "지도"
 SUBJECTS_SECTION = "분야"
 
 BOT_SUFFIX = "[bot]"
@@ -1280,6 +1286,125 @@ def merge_subjects(new, path=SUBJECTS_PATH):
     return added, updated, removed
 
 
+def build_overrides(payload):
+    """`## 지도` 절 → {"hidden": [...], "renamed": [{from,to}]}.
+
+    형식은 사람이 Issue에 손으로 적어도 되게 단순하게 둔다:
+
+        ## 지도
+        ### 감추기
+        - 오늘 한 것
+        ### 이름 합치기
+        - Fréchet 평균 → Fréchet mean
+
+    화살표는 `→`·`->`·`=>`를 받는다. 개념 지도(`←`)와 방향이 **반대**인 것이 중요하다:
+    저기서는 "무엇이 필요한가"이고 여기서는 "무엇으로 바뀌는가"다.
+    """
+    body = assemble(payload)
+    _, section = pop_section(body, OVERRIDES_SECTION)
+    if not section:
+        return {}
+
+    hidden, renamed, mode = [], [], ""
+    for line in section.splitlines():
+        head = re.match(r"^#{3,}\s*(.+?)\s*$", line.strip())
+        if head:
+            name = head.group(1).strip()
+            mode = "hidden" if "감추" in name else "renamed" if "이름" in name or "합치" in name else ""
+            continue
+        item = re.match(r"^\s*[-*+]\s+(.+)$", line)
+        if not item:
+            continue
+        value = item.group(1).strip().strip("`")
+        if mode == "hidden":
+            if value:
+                hidden.append(value)
+        elif mode == "renamed":
+            parts = re.split(r"→|->|=>", value, maxsplit=1)
+            if len(parts) == 2:
+                src, dst = parts[0].strip().strip("`"), parts[1].strip().strip("`")
+                if src and dst:
+                    renamed.append({"from": src, "to": dst})
+
+    if not hidden and not renamed:
+        return {}
+    return {"hidden": hidden, "renamed": renamed}
+
+
+def merge_overrides(new, path=OVERRIDES_PATH):
+    """concepts-overrides.yaml 병합 — 지금 것에 **더한다**(지우지 않는다).
+
+    덮어쓰지 않는 이유는 subjects.yaml과 같다: 이 파일은 여러 세션에 걸쳐 자란다.
+    이번에 안 적은 항목을 지우면 지난번에 감춘 노드가 슬그머니 되살아난다.
+
+    되돌리기는 사용자가 이 파일에서 한 줄을 지우는 것으로 한다 — 감추기를 취소하는
+    Issue를 또 만들면, 무엇이 현재 상태인지가 Issue 이력에 흩어진다.
+    """
+    header, hidden, renamed = [], [], []
+    if os.path.exists(path):
+        with open(path, encoding="utf-8") as f:
+            lines = f.read().splitlines()
+        cut = next((i for i, l in enumerate(lines) if re.match(r"^(hidden|renamed):", l)), len(lines))
+        header = lines[:cut]
+        mode, pending = "", None
+        for line in lines[cut:]:
+            if line.lstrip().startswith("#"):
+                continue
+            m = re.match(r"^(hidden|renamed):\s*(\[\])?\s*$", line)
+            if m:
+                mode, pending = m.group(1), None
+                continue
+            if mode == "hidden":
+                item = re.match(r"^\s*-\s+(.+)$", line)
+                if item:
+                    hidden.append(item.group(1).strip().strip("\"'"))
+            elif mode == "renamed":
+                f_m = re.match(r"^\s*-\s*from:\s*(.+)$", line)
+                t_m = re.match(r"^\s*to:\s*(.+)$", line)
+                if f_m:
+                    pending = {"from": f_m.group(1).strip().strip("\"'")}
+                elif t_m and pending:
+                    pending["to"] = t_m.group(1).strip().strip("\"'")
+                    renamed.append(pending)
+                    pending = None
+    if not header:
+        header = [
+            "# 지식 그래프 손보기 — 지도만 고친다. 기록(daily 노트)은 그대로 둔다.",
+            "#",
+            "# hidden   그래프에서 뺀다 (한 줄 지우면 되돌아온다)",
+            "# renamed  같은 것으로 합친다 (별칭이라 다음 세션에도 계속 합쳐진다)",
+        ]
+
+    added_hidden = [h for h in (new.get("hidden") or []) if h not in hidden]
+    hidden.extend(added_hidden)
+
+    known = {(r.get("from"), r.get("to")) for r in renamed}
+    added_renamed = [
+        r for r in (new.get("renamed") or [])
+        # 자기 자신으로 바꾸기는 무한 루프의 씨앗이라 파일에 넣지 않는다.
+        if r.get("from") and r.get("to") and r["from"] != r["to"]
+        and (r["from"], r["to"]) not in known
+    ]
+    renamed.extend(added_renamed)
+
+    def quote(v):
+        return '"' + str(v).replace('"', "'") + '"'
+
+    out = list(header)
+    if out and out[-1].strip():
+        out.append("")
+    out.append("hidden:" if hidden else "hidden: []")
+    out.extend(f"  - {quote(h)}" for h in hidden)
+    out.append("")
+    out.append("renamed:" if renamed else "renamed: []")
+    for r in renamed:
+        out.append(f"  - from: {quote(r['from'])}")
+        out.append(f"    to: {quote(r['to'])}")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("\n".join(out) + "\n")
+    return added_hidden, added_renamed
+
+
 def merge_tracks(new, path=TRACKS_PATH):
     """tracks.yaml을 id 단위로 병합한다(topics와 같은 규칙).
 
@@ -1497,6 +1622,35 @@ def main():
                     f.write(text + "\n")
             if not build_topics(payload):
                 return
+
+        overrides = build_overrides(payload)
+        if overrides:
+            if args.dry_run:
+                print(f"[dry-run] {OVERRIDES_PATH}\n")
+                print(json.dumps(overrides, ensure_ascii=False, indent=2))
+                return
+            added_hidden, added_renamed = merge_overrides(overrides)
+            report = [f"✅ 지식 그래프 손보기 — `{OVERRIDES_PATH}`", ""]
+            if added_hidden:
+                report.append(f"- 감춤: {', '.join(f'`{h}`' for h in added_hidden)}")
+            if added_renamed:
+                report.append(
+                    "- 이름 합치기: "
+                    + ", ".join(f"`{r['from']}` → `{r['to']}`" for r in added_renamed)
+                )
+            if not added_hidden and not added_renamed:
+                report.append("- 바뀐 것 없음 (이미 적용돼 있다)")
+            report += [
+                "",
+                "> **노트와 원장은 그대로다.** 그래프에서만 빠진다 — 되돌리려면 "
+                f"`{OVERRIDES_PATH}`에서 그 줄을 지우면 다음 빌드에 돌아온다.",
+            ]
+            text = "\n".join(report)
+            print(text)
+            if args.report:
+                with open(args.report, "w", encoding="utf-8") as f:
+                    f.write(text + "\n")
+            return
 
         subjects = build_subjects(payload)
         if subjects:

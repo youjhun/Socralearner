@@ -95,5 +95,57 @@ class TestBuildOutput(unittest.TestCase):
         self.assertTrue(all(d["why_drill"] for d in data["drills"]))
 
 
+class TestOverrides(unittest.TestCase):
+    """지도 손보기 — 감추기·이름 합치기. 기록(노트)은 건드리지 않는다."""
+
+    def test_hidden_drops_the_node_and_its_edges(self):
+        edges = [("딥러닝", "선형대수"), ("오늘 한 것", "선형대수")]
+        domain = {"딥러닝": "ML", "오늘 한 것": "잡동사니"}
+        mastery = {"딥러닝": {"state": "암기"}, "오늘 한 것": {"state": "미학습"}}
+        edges, domain, mastery, n = bc.apply_overrides(
+            edges, domain, mastery, {"오늘 한 것"}, {}
+        )
+        # 엣지를 같이 빼지 않으면 그래프에 이름 없는 점이 남는다.
+        self.assertEqual(edges, [("딥러닝", "선형대수")])
+        self.assertNotIn("오늘 한 것", domain)
+        self.assertNotIn("오늘 한 것", mastery)
+        self.assertEqual(n, 2)
+
+    def test_rename_merges_two_names_into_one(self):
+        edges = [("Fréchet 평균", "측지선"), ("Fréchet mean", "리만다양체")]
+        mastery = {"Fréchet 평균": {"state": "암기"}, "Fréchet mean": {"state": "설명가능"}}
+        edges, domain, mastery, _ = bc.apply_overrides(
+            edges, {}, mastery, set(), {bc._fold("Fréchet 평균"): "Fréchet mean"}
+        )
+        self.assertEqual(
+            edges, [("Fréchet mean", "측지선"), ("Fréchet mean", "리만다양체")]
+        )
+        self.assertEqual(list(mastery), ["Fréchet mean"])
+
+    def test_hiding_by_the_old_name_still_works(self):
+        """이름을 바꾼 뒤 옛 이름으로 감춰도 잡힌다 — 순서가 반대면 새 이름이 살아남는다."""
+        edges, _, mastery, _ = bc.apply_overrides(
+            [("옛 이름", "선형대수")], {}, {"옛 이름": {}},
+            {"옛 이름"}, {bc._fold("옛 이름"): "새 이름"},
+        )
+        self.assertEqual(edges, [])
+        self.assertEqual(mastery, {})
+
+    def test_self_rename_is_refused(self):
+        """A → A는 무한 루프의 씨앗이라 로더가 애초에 받지 않는다."""
+        import tempfile
+        with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False, encoding="utf-8") as f:
+            f.write("hidden: []\nrenamed:\n  - from: A\n    to: A\n")
+            path = f.name
+        try:
+            _, renamed = bc.load_overrides(path)
+        finally:
+            os.unlink(path)
+        self.assertEqual(renamed, {})
+
+    def test_missing_file_changes_nothing(self):
+        self.assertEqual(bc.load_overrides("does-not-exist.yaml"), (set(), {}))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
