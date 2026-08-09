@@ -71,6 +71,10 @@ NEVER = (
     "topics.yaml",
     "tracks.yaml",  # 내가 나눈 학습 서랍 — 덮어쓰면 세션 저장 위치가 흔들린다
     "subjects.yaml",  # 분야 목록 — 학습자의 것이다(topics.yaml과 같은 성격)
+    # 개념 레지스트리 — 학습자가 손으로 쌓은 그래프의 SSOT다. 템플릿은 빈 견본만 주고,
+    # 채워진 것은 절대 덮지 않는다. SYNC에 `scripts/`가 통째로 들어 있어 목록이 조금만
+    # 넓어져도 사고가 나므로, 지금 안 겹치더라도 **명시로 막아 둔다**(NEVER가 SYNC를 이긴다).
+    "knowledge/",
     "README.md",
     "pilot/",  # 파일럿 롤업 산출물 — 내 저장소에서 계산된 내 수치다(pilot_rollup.py)
 )
@@ -85,7 +89,11 @@ NEVER = (
 #
 # 그래서 **create-only**로 연다: 없으면 템플릿의 빈 견본을 놓고, 있으면 절대 손대지 않는다.
 # NEVER의 뜻은 "덮어쓰지 마라"이지 "만들지도 마라"가 아니다.
-SEED_IF_MISSING = ("subjects.yaml", "tracks.yaml", "topics.yaml")
+SEED_IF_MISSING = (
+    "subjects.yaml", "tracks.yaml", "topics.yaml",
+    # 빈 견본. 비어 있는 동안은 노트 모드가 그대로 돌고, 채우면 그때부터 그래프의 SSOT가 된다.
+    "knowledge/concepts.yaml",
+)
 
 
 WORKFLOW_DIR = ".github/workflows/"

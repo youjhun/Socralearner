@@ -56,6 +56,7 @@ write(src, "STATUS.md", "템플릿 기본 STATUS")
 write(src, "mastery.md", "템플릿 기본 원장")
 write(src, "README.md", "템플릿 README")
 write(src, "daily/2026-01-01-example-session.md", "예시 세션")
+write(src, "knowledge/concepts.yaml", "concepts: []        # 템플릿 빈 견본")
 
 # ── 학습자 저장소 (옛 버전 + 자기 기록) ─────────────────────────────────────
 write(dst, "scripts/build_concepts.py", "옛 버전")
@@ -75,6 +76,9 @@ MY = {
     "materials/lecture-01.md": "내가 올린 강의자료",
     "papers/inbox.md": "내 논문 인박스",
     "mastery/2026-07-30-x.md": "내 승급 조각",
+    # 개념 레지스트리 — 손으로 쌓은 그래프의 SSOT다. 템플릿의 빈 견본이 이걸 덮으면
+    # 개념 72·선수관계 75가 한 번에 0이 된다(그리고 그래프는 조용히 비어 보인다).
+    "knowledge/concepts.yaml": "concepts:\n- id: fourier\n  label: 푸리에 변환",
 }
 for rel, text in MY.items():
     write(dst, rel, text)
@@ -112,7 +116,8 @@ added2, changed2 = sync.plan(src, dst)
 check("다시 돌려도 변경 없음", not added2 and not changed2, f"added={added2} changed={changed2}")
 
 print("\n⑦ 보호 경로 판정 자체")
-for rel in ("daily/x.md", "daily", "topics.yaml", "mastery/a.md", "materials/deep/x.md"):
+for rel in ("daily/x.md", "daily", "topics.yaml", "mastery/a.md", "materials/deep/x.md",
+            "knowledge/concepts.yaml", "knowledge"):
     check(f"{rel} → 보호됨", sync.is_protected(rel))
 for rel in ("scripts/x.py", "runner/instructions.md", "presets/toeic/README.md"):
     check(f"{rel} → 보호 아님", not sync.is_protected(rel))
@@ -151,10 +156,22 @@ with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as dst:
         f.write("subjects: []\n")
     with open(os.path.join(src, "tracks.yaml"), "w", encoding="utf-8") as f:
         f.write("tracks: []\n")
+    os.makedirs(os.path.join(src, "knowledge"), exist_ok=True)
+    with open(os.path.join(src, "knowledge", "concepts.yaml"), "w", encoding="utf-8") as f:
+        f.write("concepts: []\n")
 
     added, changed = sync.plan(src, dst)
     check("없으면 씨앗을 만든다", "subjects.yaml" in added and "tracks.yaml" in added,
           str(added))
+    # 빈 견본이라 노트 모드는 그대로 돌고, 채우면 그때부터 그래프의 SSOT가 된다.
+    check("레지스트리 빈 견본도 씨앗으로 놓인다", "knowledge/concepts.yaml" in added, str(added))
+
+    sync.apply(src, dst, added + changed)
+    with open(os.path.join(dst, "knowledge", "concepts.yaml"), "w", encoding="utf-8") as f:
+        f.write("concepts:\n- id: fourier\n")   # 학습자가 채웠다
+    added_r, changed_r = sync.plan(src, dst)
+    check("채워진 레지스트리는 씨앗에도 갱신에도 안 들어간다",
+          "knowledge/concepts.yaml" not in added_r + changed_r, str(added_r + changed_r))
 
     # 학습자가 이미 채워 둔 파일을 템플릿 견본으로 되돌리면 묶어 둔 분야가 통째로 날아간다.
     with open(os.path.join(dst, "subjects.yaml"), "w", encoding="utf-8") as f:
