@@ -122,6 +122,20 @@ for rel in ("daily/x.md", "daily", "topics.yaml", "mastery/a.md", "materials/dee
 for rel in ("scripts/x.py", "runner/instructions.md", "presets/toeic/README.md"):
     check(f"{rel} → 보호 아님", not sync.is_protected(rel))
 
+print("\n⑦-b 컴파일 산출물은 남의 저장소에 심지 않는다")
+# 템플릿에서는 .gitignore가 막지만 이 스크립트는 작업 트리를 걷는다 — 로컬에서 테스트를
+# 한 번 돌린 뒤 동기화하면 .pyc가 딸려 가고, 받는 쪽엔 .gitignore가 없을 수도 있다.
+for rel in ("scripts/__pycache__/build_concepts.cpython-311.pyc", "scripts/x.pyc",
+            "runner/__pycache__/a.pyc"):
+    check(f"{rel} → 후보 아님", sync.is_junk(rel))
+for rel in ("scripts/build_concepts.py", "runner/instructions.md"):
+    check(f"{rel} → 정상 후보", not sync.is_junk(rel))
+src_j = os.path.join(tmp, "template_junk")
+write(src_j, "scripts/a.py", "엔진")
+write(src_j, "scripts/__pycache__/a.cpython-311.pyc", "바이트코드")
+check("__pycache__는 계획에 아예 안 들어온다",
+      not any("pycache" in r for r in sum(sync.plan(src_j, os.path.join(tmp, "mine_junk")), [])))
+
 print("\n⑧ 워크플로 파일을 따로 셀 수 있다 (기본 토큰으로는 못 밀기 때문)")
 check(".github/workflows/x.yml → 워크플로", sync.is_workflow(".github/workflows/x.yml"))
 check("scripts/x.py → 워크플로 아님", not sync.is_workflow("scripts/x.py"))

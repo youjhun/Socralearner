@@ -98,6 +98,20 @@ SEED_IF_MISSING = (
 
 WORKFLOW_DIR = ".github/workflows/"
 
+# 소스가 아닌 것 — 동기화가 남의 저장소에 컴파일 산출물을 심지 않게 한다.
+# 템플릿에서는 `.gitignore`가 막지만 이 스크립트는 **작업 트리를 걷는다**. 그래서 로컬에서
+# 테스트를 한 번 돌린 뒤 동기화하면 `scripts/__pycache__/*.pyc`가 그대로 딸려 가고,
+# 받는 쪽 저장소에는 `.gitignore`가 없을 수도 있어 그대로 커밋된다.
+IGNORE_DIRS = ("__pycache__", ".git", ".pytest_cache", "node_modules")
+IGNORE_SUFFIXES = (".pyc", ".pyo")
+
+
+def is_junk(rel):
+    """소스가 아닌 산출물인가 — 컴파일 캐시 따위."""
+    rel = rel.replace(os.sep, "/")
+    parts = rel.split("/")
+    return any(d in parts for d in IGNORE_DIRS) or rel.endswith(IGNORE_SUFFIXES)
+
 
 def is_workflow(rel):
     return rel.replace(os.sep, "/").startswith(WORKFLOW_DIR)
@@ -127,10 +141,11 @@ def candidate_files(src_root):
                 for fn in filenames:
                     full = os.path.join(dirpath, fn)
                     rel = os.path.relpath(full, src_root).replace(os.sep, "/")
-                    if not is_protected(rel):
+                    if not is_protected(rel) and not is_junk(rel):
                         out.append(rel)
         else:
-            if os.path.isfile(os.path.join(src_root, entry)) and not is_protected(entry):
+            if (os.path.isfile(os.path.join(src_root, entry))
+                    and not is_protected(entry) and not is_junk(entry)):
                 out.append(entry)
     return sorted(set(out))
 
