@@ -484,6 +484,37 @@ updated: 2026-08-02
         check("복습 질문은 여전히 교체된다",
               "왜 Open Circuit인가" not in open(path, encoding="utf-8").read())
 
+    # ── `[자료]` 라벨은 사실을 말한다 ────────────────────────────────────────
+    #
+    # 2026-08-09: 앱에서 PDF를 파싱해 초안만 만들고 세션 없이 닫으면 본문 전체가 원문인데도
+    # frontmatter가 조건 없이 `distilled`를 적고 있었다(실측 102KB, `## ` 헤딩은
+    # `러너에게`·`원문` 둘뿐). 조용한 거짓말이라 저작권 판단까지 오도한다.
+    print("\n[자료] 증류 라벨")
+    APP_DRAFT = {"number": 7, "title": "[자료] 2026-08-09 piercing — Threshold Crossing",
+                 "body": "## 러너에게\n읽어라\n\n## 원문\n" + "본문 " * 50}
+    REAL = {"number": 8, "title": "[자료] 2026-08-09 cs224n — Lecture 8",
+            "body": "## 요약\n목차 수준의 지도\n\n## 개념 지도\n- 어텐션 ← 내적\n\n"
+                    "## 빈칸 문제\n1. ___은 쿼리와 키의 내적이다."}
+
+    drafted = ingest.build_material(APP_DRAFT, "2026-08-09")
+    check("증류 없는 원문은 raw로 적힌다", "tags: [material, raw]" in drafted["content"],
+          drafted["content"][:200])
+    check("증류 없는 원문에 distilled가 안 붙는다", "distilled]" not in drafted["content"])
+    check("source가 증류를 주장하지 않는다", "증류 없음" in drafted["content"])
+    check("build_material이 판정을 돌려준다", drafted["distilled"] is False)
+
+    real = ingest.build_material(REAL, "2026-08-09")
+    check("실제 증류본은 distilled로 적힌다", "tags: [material, distilled]" in real["content"],
+          real["content"][:200])
+    check("실제 증류본의 source는 증류를 말한다", "자료 증류 →" in real["content"])
+    check("실제 증류본 판정", real["distilled"] is True)
+
+    # 판정 기준 자체 — `## 개념 지도`가 파이프라인이 실제로 먹는 절이다.
+    check("개념 지도가 있으면 증류", ingest.is_distilled("## 개념 지도\n- A ← B"))
+    check("이모지·주석이 붙어도 잡는다", ingest.is_distilled("## 🗺️ 개념 지도 (초안)\n- A ← B"))
+    check("요약만 있으면 증류가 아니다", not ingest.is_distilled("## 요약\n지도"))
+    check("빈 본문은 증류가 아니다", not ingest.is_distilled(""))
+
     # ── 지식 그래프 손보기 (`## 지도` → concepts-overrides.yaml) ──────────────
     #
     # 노드는 daily 노트에서 매번 다시 만들어지므로 진짜 "삭제"는 노트를 고치는 일이 된다.

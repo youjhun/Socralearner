@@ -100,6 +100,10 @@ TRAJECTORY_KEEP = 7
 # 개념의 단위 정의는 runner/instructions.md의 "개념의 단위"에 있다. 여기는 그 저장 경로일 뿐이다.
 DRILLS_SECTION = "드릴 항목"
 DRILLS_PATH = "drills.md"
+
+# `## 개념 지도` — `build_concepts.py`가 선수관계를 읽어 가는 절(그쪽 `SECTION`과 같은 값).
+# 여기서는 `[자료]` 본문이 실제로 증류됐는지 가리는 데 쓴다(`is_distilled`).
+CONCEPT_MAP_SECTION = "개념 지도"
 DRILLS_HEADER = [
     "---",
     'title: "드릴 항목 (회상 대상)"',
@@ -399,13 +403,29 @@ def ensure_headings(body):
     return body, missing
 
 
+def is_distilled(body):
+    """이 본문이 **실제로 증류된 것인가** — `## 개념 지도`가 있는가.
+
+    셋 중 이것을 기준으로 삼는 이유: 요약·빈칸 문제는 사람이 읽는 것이지만 `## 개념 지도`는
+    **파이프라인이 실제로 먹는 것**이다(`build_concepts.py`가 materials/에서 선수관계를
+    읽어 간다). 이게 없으면 그래프에 아무것도 안 들어가므로, 증류의 값이 없는 것과 같다.
+    """
+    return bool(re.search(r"^##\s*.*%s" % re.escape(CONCEPT_MAP_SECTION), body or "", re.M))
+
+
 def build_material(payload, today):
-    """`[자료]` Issue → materials/<slug>.md — 강의자료(PDF)를 **1회 증류**한 파생 학습자료.
+    """`[자료]` Issue → materials/<slug>.md — 강의자료를 증류한(또는 못 한) 파생 학습자료.
 
     왜 이 경로인가: Custom GPT Action 응답은 텍스트라 repo의 PDF를 세션에서 읽을 수
     없다. 그래서 PDF는 대화에 한 번 올리고, 요약(지도)·개념 지도·빈칸 문제 은행을
-    텍스트로 남긴다 — 이후 세션은 readFile로 끌어온다. 원문 PDF는 저장하지 않는다
-    (저작권·용량). 정규 헤딩 강제·STATUS/mastery 처리도 하지 않는다(세션 로그가 아니다).
+    텍스트로 남긴다 — 이후 세션은 readFile로 끌어온다.
+    정규 헤딩 강제·STATUS/mastery 처리는 하지 않는다(세션 로그가 아니다).
+
+    **라벨은 사실을 말한다.** 2026-08-09: 앱에서 PDF를 파싱해 초안만 만들고 세션 없이
+    닫으면 본문 전체가 원문인데도 frontmatter가 조건 없이 `distilled`를 적고 있었다
+    (실측: 102KB 전부 원문, `## ` 헤딩은 `러너에게`·`원문` 둘뿐). 조용한 거짓말이라
+    "이 파일은 증류본이니 원문이 아니다"라는 저작권 판단까지 오도한다. 그래서 본문을
+    보고 정한다 — 증류가 있으면 `distilled`, 없으면 `raw`.
     """
     raw = assemble(payload)
     user_fm, body = split_frontmatter(raw)
@@ -417,20 +437,26 @@ def build_material(payload, today):
     display = (tail or head).strip()
     display = re.sub(r"^\s*\[[^\]]*\]\s*", "", display).strip()
     display = re.sub(r"^\d{4}-\d{2}-\d{2}\s*", "", display).strip() or slug
+    distilled = is_distilled(body)
     fm = [
         "---",
         f'title: "{display}"',
         f"created: {today}",
         f"updated: {today}",
-        "tags: [material, distilled]",
-        f'source: "자료 증류 → Issue #{payload.get("number")} (원문 PDF는 저장하지 않음)"',
+        f"tags: [material, {'distilled' if distilled else 'raw'}]",
+        (f'source: "자료 증류 → Issue #{payload.get("number")}"' if distilled else
+         f'source: "원문 텍스트 (증류 없음) → Issue #{payload.get("number")}"'),
         "kind: material",
         f"source_issue: {payload.get('number')}",
         "---",
     ]
     if not re.match(r"^#\s", body):
         body = f"# {display}\n\n" + body
-    return {"slug": slug, "content": "\n".join(fm) + "\n\n" + body.rstrip() + "\n"}
+    return {
+        "slug": slug,
+        "distilled": distilled,
+        "content": "\n".join(fm) + "\n\n" + body.rstrip() + "\n",
+    }
 
 
 def build_note(payload, today):
@@ -1740,12 +1766,26 @@ def main():
         os.makedirs(MATERIALS_DIR, exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:
             f.write(note["content"])
-        report = [
-            f"✅ 자료 지도 저장 — `{path}` ({len(note['content'].splitlines())}줄)",
-            "",
-            "- 원문 PDF는 저장하지 않았다(저작권·용량) — 요약·개념 지도·빈칸 문제 은행만 남는다.",
-            "- 다음 세션부터 러너가 이 파일을 readFile로 끌어와 쓴다.",
-        ]
+        lines = len(note["content"].splitlines())
+        if note["distilled"]:
+            report = [
+                f"✅ 자료 지도 저장 — `{path}` ({lines}줄)",
+                "",
+                "- 요약·개념 지도·빈칸 문제 은행이 들어 있다 — `## 개념 지도`는 그래프로 간다.",
+                "- 다음 세션부터 러너가 이 파일을 readFile로 끌어와 쓴다.",
+            ]
+        else:
+            # 증류를 대신 해 주지 않는다(이 CI는 LLM 토큰 0이 원칙이다). 대신 무엇이 저장됐고
+            # 무엇이 없는지 정확히 말한다 — 라벨과 보고가 어긋나면 저작권 판단까지 오도한다.
+            report = [
+                f"✅ 자료 원문 저장 — `{path}` ({lines}줄)",
+                "",
+                "- ⚠️ **증류는 없다** — `## 개념 지도`가 없어 `tags: [material, raw]`로 적었다.",
+                "  그래프에 들어가는 것은 없다(선수관계는 `## 개념 지도`에서만 읽는다).",
+                "- 세션에서 이 자료를 증류하려면 러너에게 "
+                "`이 자료 증류해줘 — 요약·개념 지도·빈칸 문제로.`라고 한다.",
+                "- 다음 세션부터 러너가 이 파일을 readFile로 끌어와 쓴다.",
+            ]
         text = "\n".join(report)
         print(text)
         if args.report:
