@@ -93,6 +93,9 @@ SEED_IF_MISSING = (
     "subjects.yaml", "tracks.yaml", "topics.yaml",
     # 빈 견본. 비어 있는 동안은 노트 모드가 그대로 돌고, 채우면 그때부터 그래프의 SSOT가 된다.
     "knowledge/concepts.yaml",
+    # 지도 손보기(감추기·이름 합치기). 없어도 조용히 동작하지만, **파일이 없으면 이런 손잡이가
+    # 있다는 것 자체를 모른다.** 앱의 "감추기" 버튼이 쓰는 파일이라 빈 견본을 놓아 둔다.
+    "concepts-overrides.yaml",
 )
 
 
