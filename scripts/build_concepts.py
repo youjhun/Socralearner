@@ -38,6 +38,11 @@
 그래서 지도 손보기(concepts-overrides)·분야 정규화(subjects)·개념/항목 분리가 한 벌로
 유지되고, 사용자가 쓰는 손잡이가 모드와 무관하게 같다.
 
+**레지스트리 모드에서도 노트를 계속 읽는다.** 레지스트리는 큐레이션한 것을 지키고,
+거기 **없는** 개념·간선은 daily·materials의 `## 개념 지도`에서 받는다(`merge_note_ingredients`).
+레지스트리만 SSOT로 쓰면 세션이나 앱이 새로 만든 개념 지도가 그래프에 영영 안 들어가서,
+자료를 올려 증류까지 됐는데 노드가 안 느는 일이 생긴다 — 그러면 사람은 같은 자료를 또 올린다.
+
 판정(state)은 레지스트리가 정하지 않는다 — `mastery:` 필드가 이해도 원장의 행을 가리키고,
 `check_concept_ledger.py`가 둘의 드리프트를 잡는다. **원장이 판정의 SSOT다.**
 
@@ -640,6 +645,53 @@ def registry_ingredients(concepts):
     return mastery, edges, domain_of, sources, ids, problems
 
 
+def merge_note_ingredients(mastery, edges, domain_of, sources, ids):
+    """레지스트리 재료에 노트 재료를 합친다. **레지스트리가 이긴다 — 노트는 빈 곳만 채운다.**
+
+    왜 합치는가 (2026-08-09): 레지스트리만 SSOT로 쓰면 세션이나 앱이 새로 만든
+    `## 개념 지도`가 그래프에 **영영 안 들어간다**. 자료를 올려 증류까지 됐는데 노드가
+    하나도 안 늘면, 사람은 "증류가 안 됐나" 하고 같은 자료를 다시 올린다.
+    그래서 레지스트리는 큐레이션한 것을 지키고, 거기 **없는** 개념·간선은 노트에서 받는다.
+
+    합치는 규칙:
+      · 간선 — 레지스트리에 없는 쌍만 더한다.
+      · 개념 — 레지스트리에 없는 라벨만 노드로 세우고, 판정은 이해도 원장에서 가져온다.
+      · 분야 — 레지스트리 분야가 이긴다. 노트 분야는 레지스트리 밖 개념에만 붙는다.
+      · 근거 — 레지스트리 개념의 근거는 **큐레이션된 앵커뿐이다**(노트에서 더 긁지 않는다).
+                밖의 개념만 노트에서 근거를 모은다.
+
+    이름이 달라 같은 개념이 둘로 보이면 `concepts-overrides.yaml`의 `renamed`로 합친다
+    (이 함수 뒤에 도는 지도 손보기가 그 일을 한다).
+
+    돌려주는 것: (새 개념 수, 새 간선 수).
+    """
+    reg_labels = set(mastery)
+    note_edges, note_domains = parse_concept_map()
+
+    seen = set(edges)
+    n_edges = 0
+    for pair in note_edges:
+        if pair not in seen:
+            edges.append(pair)
+            seen.add(pair)
+            n_edges += 1
+
+    new_labels = {lb for pair in note_edges for lb in pair} | set(note_domains)
+    new_labels -= reg_labels
+    if new_labels:
+        ledger = parse_mastery()
+        for lb in sorted(new_labels):
+            # 판정은 원장이 SSOT다 — 레지스트리 밖이라고 다르지 않다. 없으면 미학습.
+            mastery[lb] = dict(ledger.get(lb, {}))
+        sources.update(collect_sources(sorted(new_labels)))
+
+    for lb, domain in note_domains.items():
+        if lb not in reg_labels:
+            domain_of[lb] = domain
+
+    return len(new_labels), n_edges
+
+
 def _rename_keys(table, renamed, merge=False):
     """라벨을 키로 쓰는 표(ids·sources)를 이름 합치기에 맞춰 옮긴다.
 
@@ -826,8 +878,14 @@ def main():
     # **빈 레지스트리는 모드를 켜지 않는다.** 템플릿이 함께 주는 견본(`concepts: []`)이
     # 노트 모드를 꺼 버리면, 아무것도 안 한 사용자의 그래프가 이유 없이 비어 버린다.
     registry = load_registry()
+    n_note_concepts = n_note_edges = 0
     if registry:
         mastery, edges, domain_of, sources, ids, anchor_problems = registry_ingredients(registry)
+        # 레지스트리가 이기되, 거기 없는 개념·간선은 노트에서 받는다 — 안 그러면 세션이나
+        # 앱이 새로 만든 `## 개념 지도`가 그래프에 영영 안 들어간다.
+        n_note_concepts, n_note_edges = merge_note_ingredients(
+            mastery, edges, domain_of, sources, ids
+        )
     else:
         ids, anchor_problems = {}, []
         mastery = parse_mastery()
@@ -875,6 +933,11 @@ def main():
         f"✅ {OUT}{' (레지스트리 모드)' if registry else ''} — 개념 {n} · 선수관계 {n_edges} · "
         f"설명가능 {n_mastered} · 원문 근거 {n_sources}조각 · 분야 {n_domains}개"
     )
+    if n_note_concepts or n_note_edges:
+        print(f"   ➕ 레지스트리 밖에서 개념 {n_note_concepts}개 · 선수관계 {n_note_edges}개를 "
+              "노트에서 받았다(daily · materials의 `## 개념 지도`).")
+        print("      큐레이션에 넣고 싶으면 knowledge/concepts.yaml로 옮겨 적는다. "
+              "이름이 겹쳐 보이면 concepts-overrides.yaml의 renamed로 합친다.")
     if anchor_problems:
         # 실패시키지 않는다 — 기록이 먼저다. 다만 조용히 넘어가지도 않는다.
         print(f"   ⚠️ 레지스트리 문제 {len(anchor_problems)}건 (개념은 남고 그 근거만 빈다):")

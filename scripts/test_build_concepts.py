@@ -331,6 +331,85 @@ class TestEmptyRegistryStaysNoteMode(unittest.TestCase):
         self.assertFalse(bc.load_registry("does-not-exist.yaml"))
 
 
+class TestRegistryPlusNotes(unittest.TestCase):
+    """레지스트리가 이기되, 거기 없는 것은 노트에서 받는다.
+
+    이게 없으면 세션이나 앱이 새로 만든 `## 개념 지도`가 그래프에 **영영 안 들어간다** —
+    자료를 올려 증류까지 됐는데 노드가 안 늘면 사람은 같은 자료를 다시 올린다.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.cwd = os.getcwd()
+        os.chdir(self.tmp.name)
+        os.makedirs("daily")
+        self.addCleanup(self.tmp.cleanup)
+        self.addCleanup(os.chdir, self.cwd)
+
+    def write(self, rel, text):
+        os.makedirs(os.path.dirname(rel) or ".", exist_ok=True)
+        with open(rel, "w", encoding="utf-8") as f:
+            f.write(text)
+
+    def registry_side(self):
+        """레지스트리에서 온 재료 — 개념 하나(푸리에 변환)."""
+        mastery = {"푸리에 변환": {"state": "설명가능", "importance": "H", "note": "",
+                                "verified": "2026-08-01", "evidence": ""}}
+        sources = {"푸리에 변환": [{"file": "x.md", "kind": "지식", "match": "앵커에서 꺼낸 원문"}]}
+        return mastery, [], {"푸리에 변환": "신호처리"}, sources, {"푸리에 변환": "fourier"}
+
+    def test_note_edges_outside_the_registry_are_taken(self):
+        self.write("materials/lec08/distilled.md",
+                   "## 개념 지도\n### 딥러닝\n- 어텐션 ← 내적\n")
+        mastery, edges, domain_of, sources, ids = self.registry_side()
+        n_c, n_e = bc.merge_note_ingredients(mastery, edges, domain_of, sources, ids)
+        self.assertEqual((n_c, n_e), (2, 1))
+        self.assertIn(("어텐션", "내적"), edges)
+        self.assertEqual(domain_of["어텐션"], "딥러닝")
+
+    def test_registry_concept_keeps_its_domain_and_curated_id(self):
+        """노트가 같은 개념을 다른 분야로 적어도 레지스트리가 이긴다."""
+        self.write("daily/2026-08-09-x.md", "## 개념 지도\n### 잡동사니\n- 푸리에 변환\n")
+        mastery, edges, domain_of, sources, ids = self.registry_side()
+        bc.merge_note_ingredients(mastery, edges, domain_of, sources, ids)
+        self.assertEqual(domain_of["푸리에 변환"], "신호처리")
+        data = bc.build(mastery, edges, domain_of, sources, ids)
+        entry = next(c for c in data["concepts"] if c["label"] == "푸리에 변환")
+        self.assertEqual(entry["id"], "fourier")
+
+    def test_registry_sources_are_not_augmented_from_notes(self):
+        """큐레이션된 앵커가 근거의 전부다 — 노트에서 더 긁으면 근거 수가 조용히 부푼다."""
+        self.write("daily/2026-08-09-x.md",
+                   "## 오늘 직접 학습한 지식\n- 푸리에 변환은 회전이다\n")
+        mastery, edges, domain_of, sources, ids = self.registry_side()
+        bc.merge_note_ingredients(mastery, edges, domain_of, sources, ids)
+        self.assertEqual(len(sources["푸리에 변환"]), 1)
+        self.assertEqual(sources["푸리에 변환"][0]["match"], "앵커에서 꺼낸 원문")
+
+    def test_new_concepts_take_their_state_from_the_ledger(self):
+        """판정은 원장이 SSOT다 — 레지스트리 밖이라고 다르지 않다."""
+        self.write("mastery.md", "| 개념 | 상태 | 중요도 |\n| --- | --- |\n| 어텐션 | 암기 | H |\n")
+        self.write("daily/2026-08-09-x.md", "## 개념 지도\n- 어텐션 ← 내적\n")
+        mastery, edges, domain_of, sources, ids = self.registry_side()
+        bc.merge_note_ingredients(mastery, edges, domain_of, sources, ids)
+        self.assertEqual(mastery["어텐션"]["state"], "암기")
+        self.assertEqual(mastery["내적"], {})   # 원장에 없으면 빈 칸 → build()가 미학습으로
+
+    def test_an_edge_the_registry_already_has_is_not_duplicated(self):
+        self.write("daily/2026-08-09-x.md", "## 개념 지도\n- 푸리에 변환 ← 복소지수\n")
+        mastery, edges, domain_of, sources, ids = self.registry_side()
+        edges.append(("푸리에 변환", "복소지수"))
+        _n_c, n_e = bc.merge_note_ingredients(mastery, edges, domain_of, sources, ids)
+        self.assertEqual(n_e, 0)
+        self.assertEqual(edges.count(("푸리에 변환", "복소지수")), 1)
+
+    def test_no_notes_changes_nothing(self):
+        mastery, edges, domain_of, sources, ids = self.registry_side()
+        before = (dict(mastery), list(edges), dict(domain_of))
+        self.assertEqual(bc.merge_note_ingredients(mastery, edges, domain_of, sources, ids), (0, 0))
+        self.assertEqual((mastery, edges, domain_of), before)
+
+
 class TestRenameKeysUnderOverrides(unittest.TestCase):
     """이름을 합칠 때 큐레이션된 id와 앵커 근거가 따라가야 한다."""
 
