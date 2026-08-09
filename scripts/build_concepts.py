@@ -18,6 +18,34 @@
 산출물 `concepts.json`은 Topdown 앱이 그대로 읽는 형식이다(개념 그래프·막힌 길목·원문 인용).
 **생성물이다** — 고칠 곳은 `mastery.md`와 daily 노트다.
 
+## 재료를 어디서 얻는가 — 두 모드 (2026-08-09)
+
+**② 노트 모드(기본)** — 위에 적은 그대로. `mastery.md` + daily의 `## 개념 지도`에서 재료를
+모은다. 템플릿을 그대로 쓰는 사람에게는 아무것도 달라지지 않는다.
+
+**① 레지스트리 모드** — `knowledge/concepts.yaml`이 있으면 **재료를 그 파일에서 얻는다.**
+개념의 정체(도메인·선수관계·외부 문서)를 사람이 한 곳에 적고, 원문은 앵커(`sources[].match`)로
+매달아 빌드할 때 노트에서 **그대로** 꺼낸다(요약본을 만들지 않는다).
+
+이 모드가 필요한 이유는 ②가 구조적으로 놓치는 것이 있어서다: 선수관계는 세션이
+`## 개념 지도`를 남긴 만큼만 쌓이므로, 그 관례가 생기기 전에 쓴 노트로 배운 개념은
+**영원히 간선 0**이다(2026-08-09 실측: 개념 44개에 선수관계 0·분야 0). 그러면 이 시스템의
+핵심인 **막힌 길목**이 계산되지 않는다. 레지스트리는 그 공백을 사람이 한 번 메우고,
+이후 세션이 그 위에 쌓게 한다.
+
+**두 모드는 갈라지지 않는다.** 레지스트리는 별도 빌드 경로가 아니라
+`(mastery, edges, domain_of, sources)` 네 재료로 **번역**되어 아래 파이프라인에 합류한다.
+그래서 지도 손보기(concepts-overrides)·분야 정규화(subjects)·개념/항목 분리가 한 벌로
+유지되고, 사용자가 쓰는 손잡이가 모드와 무관하게 같다.
+
+**레지스트리 모드에서도 노트를 계속 읽는다.** 레지스트리는 큐레이션한 것을 지키고,
+거기 **없는** 개념·간선은 daily·materials의 `## 개념 지도`에서 받는다(`merge_note_ingredients`).
+레지스트리만 SSOT로 쓰면 세션이나 앱이 새로 만든 개념 지도가 그래프에 영영 안 들어가서,
+자료를 올려 증류까지 됐는데 노드가 안 느는 일이 생긴다 — 그러면 사람은 같은 자료를 또 올린다.
+
+판정(state)은 레지스트리가 정하지 않는다 — `mastery:` 필드가 이해도 원장의 행을 가리키고,
+`check_concept_ledger.py`가 둘의 드리프트를 잡는다. **원장이 판정의 SSOT다.**
+
 실행: python3 scripts/build_concepts.py   (CI가 세션마다 부른다)
 """
 import glob
@@ -34,6 +62,9 @@ OUT = "concepts.json"
 SECTION = "개념 지도"
 SUBJECTS_PATH = "subjects.yaml"
 OVERRIDES_PATH = "concepts-overrides.yaml"
+
+# 개념 레지스트리 — 있으면 재료를 여기서 얻는다 (위 §두 모드).
+REGISTRY = os.path.join("knowledge", "concepts.yaml")
 
 # ─────────────────────────── 개념 vs 항목 (2층 구조) ───────────────────────────
 #
@@ -373,8 +404,21 @@ def classify_labels(labels, prereq_of, id_of, explicit_drills):
     return concepts, [lb for lb in labels if lb in drills], reason
 
 
-def build(mastery, edges, domain_of, sources):
-    """노드(개념) + 선수관계 + 분야 + 원문 근거 → concepts.json 구조."""
+# `info`(원장 행)에 있으면 그대로 실어 보내는 선택 키 — Topdown `RawConcept`이 선언하는 것들.
+# 노트 모드의 `parse_mastery`는 이 키를 만들지 않으므로 전부 빠진다(출력 그대로).
+# 레지스트리 모드에서만 채워지고, 없는 키는 아예 넣지 않는다 — 빈 값이 "비어 있음"을
+# 주장하는 것과 키가 없는 것은 다르다.
+OPTIONAL_INFO_KEYS = ("verified", "wikipedia", "related", "open_questions")
+
+
+def build(mastery, edges, domain_of, sources, ids=None):
+    """노드(개념) + 선수관계 + 분야 + 원문 근거 → concepts.json 구조.
+
+    `ids`: {라벨: 개념 id}. 레지스트리가 **큐레이션한 id**(`matrix-vector-map`)를 slugify가
+    덮지 않게 한다 — Hunwiki `graph.json`이 같은 id를 쓰므로 여기서 새로 지으면 두 그래프가
+    같은 개념을 다른 점으로 그린다. 안 주면 지금까지처럼 라벨을 slugify한다.
+    """
+    ids = ids or {}
     labels = list(mastery.keys())
     for target, prereq in edges:  # 원장에 아직 없는 개념도 노드로 세운다
         for lb in (target, prereq):
@@ -384,7 +428,7 @@ def build(mastery, edges, domain_of, sources):
         if lb not in labels:
             labels.append(lb)
 
-    id_of = {lb: slugify(lb) for lb in labels}
+    id_of = {lb: ids.get(lb) or slugify(lb) for lb in labels}
     prereq_of = {}
     for target, prereq in edges:
         prereq_of.setdefault(id_of[target], [])
@@ -417,8 +461,13 @@ def build(mastery, edges, domain_of, sources):
             "importance": (info.get("importance") or "M")[:1].upper() if info.get("importance") else "M",
             "prereq": prereq_of.get(cid, []),
             "sources": collected,
-            "note": info.get("verified", ""),
+            # 원장에는 `note` 칸이 없어 지금까지 **검증일**이 여기 들어왔다. 레지스트리는
+            # 진짜 설명을 담으므로 그쪽이 있으면 그것이 이긴다(없으면 지금 동작 그대로).
+            "note": info["note"] if "note" in info else info.get("verified", ""),
         }
+        for key in OPTIONAL_INFO_KEYS:
+            if info.get(key):
+                entry[key] = info[key]
         if lb in drill_set:
             entry["why_drill"] = drill_reason.get(lb, "")
             drills.append(entry)
@@ -427,6 +476,236 @@ def build(mastery, edges, domain_of, sources):
 
     # `concepts`만 그래프가 된다. Topdown은 이 키만 읽으므로 앱 수정 없이 반영된다.
     return {"concepts": concepts, "drills": drills}
+
+
+# ─────────────────── 레지스트리 → 네 재료 (knowledge/concepts.yaml) ───────────────────
+#
+# 여기서 하는 일은 **번역뿐이다.** 레지스트리를 별도 빌드 경로로 만들지 않고
+# `(mastery, edges, domain_of, sources)`로 옮겨 위의 파이프라인에 그대로 태운다.
+# 그래야 지도 손보기·분야 정규화·개념/항목 분리가 모드와 무관하게 한 벌로 돈다.
+#
+# 앵커 해석은 Hunwiki `scripts/build_knowledge_graph.py`의 `extract_block`과 **같은 의미**여야
+# 한다 — 같은 노트를 읽는 두 빌더가 다른 조각을 꺼내면 두 그래프가 조용히 갈린다.
+
+LIST_MARKER = re.compile(r"^\s*(?:[-*>]|\d+\.)\s")
+MATH_INLINE = re.compile(r"\\\((.+?)\\\)", re.S)
+MATH_BLOCK = re.compile(r"\\\[(.+?)\\\]", re.S)
+
+
+def normalize_math(text):
+    """`\\( … \\)` → `$ … $`, `\\[ … \\]` → `$$ … $$`.
+
+    **내용은 한 글자도 바꾸지 않는다 — 구분자만 옮긴다.** 원본 노트가 쓰는 `\\( \\)`는
+    Obsidian·GitHub·앱 어디서도 렌더되지 않아 날LaTeX으로 보인다. `$`는 셋 다 렌더한다.
+    """
+    if not text:
+        return text
+    text = MATH_BLOCK.sub(lambda m: "$$" + m.group(1).strip() + "$$", text)
+    return MATH_INLINE.sub(lambda m: "$" + m.group(1).strip() + "$", text)
+
+
+def extract_block(text, needle):
+    """needle이 있는 곳의 **원문 블록**을 그대로 돌려준다 (요약·재작성 없음).
+
+    목록 항목이면 그 항목(+들여쓴 이어짐)만, 아니면 문단 전체. 못 찾으면 None.
+    """
+    idx = text.find(needle)
+    if idx < 0:
+        return None
+    lines = text.splitlines()
+    pos, ln = 0, 0
+    for i, line in enumerate(lines):
+        if pos + len(line) >= idx:
+            ln = i
+            break
+        pos += len(line) + 1
+
+    if LIST_MARKER.match(lines[ln]):
+        block = [lines[ln]]
+        for k in range(ln + 1, len(lines)):
+            nxt = lines[k]
+            if not nxt.strip() or nxt.startswith("#"):
+                break
+            if LIST_MARKER.match(nxt) and not nxt.startswith(("  ", "\t")):
+                break
+            block.append(nxt)
+    else:
+        start = end = ln
+        while start > 0 and lines[start - 1].strip() and not lines[start - 1].startswith("#"):
+            start -= 1
+        while end + 1 < len(lines) and lines[end + 1].strip():
+            end += 1
+        block = lines[start:end + 1]
+    return "\n".join(block).strip()
+
+
+def load_registry(path=REGISTRY):
+    """`knowledge/concepts.yaml` → 개념 목록. 없으면 빈 목록(= 노트 모드)."""
+    if not os.path.exists(path):
+        return []
+    try:
+        import yaml  # type: ignore
+    except ImportError:
+        # 조용히 노트 모드로 내려가지 않는다 — 그러면 그래프가 **이유 없이** 빈약해지고,
+        # 사용자는 자기 레지스트리가 무시된 줄 모른 채 간선 0을 본다.
+        sys.exit(f"{path}가 있는데 PyYAML이 없다 — pip install pyyaml")
+    with open(path, encoding="utf-8") as f:
+        return (yaml.safe_load(f) or {}).get("concepts") or []
+
+
+def _read_cached(rel, cache):
+    if rel not in cache:
+        try:
+            with open(rel, encoding="utf-8") as f:
+                cache[rel] = f.read()
+        except OSError:
+            cache[rel] = None
+    return cache[rel]
+
+
+def _resolve_anchors(cid, anchors, cache, problems):
+    """앵커(`file` + 원문에 그대로 있는 짧은 문자열) → 원문 조각. 요약하지 않는다."""
+    out = []
+    for anchor in anchors:
+        if not isinstance(anchor, dict):
+            continue
+        rel = str(anchor.get("file") or "")
+        needle = str(anchor.get("match") or "")
+        text = _read_cached(rel, cache)
+        if text is None:
+            problems.append(f"{cid}: 소스 파일 없음 {rel}")
+            continue
+        block = extract_block(text, needle)
+        if block is None:
+            problems.append(f"{cid}: 앵커 실패 {rel} :: {needle[:40]!r}")
+            continue
+        out.append({
+            "file": rel,
+            "kind": anchor.get("kind", "지식"),
+            "match": normalize_math(block),
+        })
+    return out
+
+
+def registry_ingredients(concepts):
+    """레지스트리 → (mastery, edges, domain_of, sources, ids, 문제 목록).
+
+    `mastery`의 값에는 원장 네 칸(state·importance·verified·evidence) 외에 `note`·`related`·
+    `wikipedia`·`open_questions`도 담는다 — `build()`가 선택 키로 그대로 실어 보낸다.
+    """
+    label_of, ids, problems = {}, {}, []
+    for c in concepts:
+        if not isinstance(c, dict):
+            continue
+        cid = str(c.get("id") or "").strip()
+        if not cid:
+            problems.append(f"id 없는 항목 — 건너뜀 ({str(c.get('label'))[:30]!r})")
+            continue
+        label = normalize_math(str(c.get("label") or "").strip()) or cid
+        label_of[cid] = label
+        ids[label] = cid
+
+    mastery, edges, domain_of, sources = {}, [], {}, {}
+    cache = {}
+    for c in concepts:
+        if not isinstance(c, dict):
+            continue
+        cid = str(c.get("id") or "").strip()
+        if not cid:
+            continue
+        lb = label_of[cid]
+
+        # 판정(state)은 레지스트리가 정하지 않는다 — 원장에서 옮겨 적은 사본이고,
+        # 어긋나면 check_concept_ledger.py가 잡는다. 여기서는 옮기기만 한다.
+        info = {
+            "state": c.get("state") or "",
+            "importance": c.get("importance") or "",
+            "verified": str(c.get("verified") or ""),
+            "evidence": "",
+            # 키를 항상 둔다 — 없으면 `build()`가 검증일을 note로 쓰는 옛 동작으로 떨어진다.
+            "note": normalize_math(str(c.get("note") or "")),
+        }
+        for key in ("wikipedia", "related", "open_questions"):
+            if c.get(key):
+                info[key] = c[key]
+        mastery[lb] = info
+
+        if c.get("domain"):
+            domain_of[lb] = str(c["domain"]).strip()
+
+        for pid in c.get("prereq") or []:
+            # 끊긴 화살표는 그래프에서 조용히 사라진다 — 지우지 말고 말한다.
+            if pid in label_of:
+                edges.append((lb, label_of[pid]))
+            else:
+                problems.append(f"{cid}: 없는 선수 개념 {pid}")
+
+        sources[lb] = _resolve_anchors(cid, c.get("sources") or [], cache, problems)
+
+    return mastery, edges, domain_of, sources, ids, problems
+
+
+def merge_note_ingredients(mastery, edges, domain_of, sources, ids):
+    """레지스트리 재료에 노트 재료를 합친다. **레지스트리가 이긴다 — 노트는 빈 곳만 채운다.**
+
+    왜 합치는가 (2026-08-09): 레지스트리만 SSOT로 쓰면 세션이나 앱이 새로 만든
+    `## 개념 지도`가 그래프에 **영영 안 들어간다**. 자료를 올려 증류까지 됐는데 노드가
+    하나도 안 늘면, 사람은 "증류가 안 됐나" 하고 같은 자료를 다시 올린다.
+    그래서 레지스트리는 큐레이션한 것을 지키고, 거기 **없는** 개념·간선은 노트에서 받는다.
+
+    합치는 규칙:
+      · 간선 — 레지스트리에 없는 쌍만 더한다.
+      · 개념 — 레지스트리에 없는 라벨만 노드로 세우고, 판정은 이해도 원장에서 가져온다.
+      · 분야 — 레지스트리 분야가 이긴다. 노트 분야는 레지스트리 밖 개념에만 붙는다.
+      · 근거 — 레지스트리 개념의 근거는 **큐레이션된 앵커뿐이다**(노트에서 더 긁지 않는다).
+                밖의 개념만 노트에서 근거를 모은다.
+
+    이름이 달라 같은 개념이 둘로 보이면 `concepts-overrides.yaml`의 `renamed`로 합친다
+    (이 함수 뒤에 도는 지도 손보기가 그 일을 한다).
+
+    돌려주는 것: (새 개념 수, 새 간선 수).
+    """
+    reg_labels = set(mastery)
+    note_edges, note_domains = parse_concept_map()
+
+    seen = set(edges)
+    n_edges = 0
+    for pair in note_edges:
+        if pair not in seen:
+            edges.append(pair)
+            seen.add(pair)
+            n_edges += 1
+
+    new_labels = {lb for pair in note_edges for lb in pair} | set(note_domains)
+    new_labels -= reg_labels
+    if new_labels:
+        ledger = parse_mastery()
+        for lb in sorted(new_labels):
+            # 판정은 원장이 SSOT다 — 레지스트리 밖이라고 다르지 않다. 없으면 미학습.
+            mastery[lb] = dict(ledger.get(lb, {}))
+        sources.update(collect_sources(sorted(new_labels)))
+
+    for lb, domain in note_domains.items():
+        if lb not in reg_labels:
+            domain_of[lb] = domain
+
+    return len(new_labels), n_edges
+
+
+def _rename_keys(table, renamed, merge=False):
+    """라벨을 키로 쓰는 표(ids·sources)를 이름 합치기에 맞춰 옮긴다.
+
+    이름이 바뀌지 않는 항목을 먼저 넣는다 — 둘이 하나로 합쳐질 때 **살아남는 이름 쪽**의
+    id가 남아야 큐레이션된 id가 유지된다.
+    """
+    out = {}
+    for lb in sorted(table, key=lambda x: renamed.get(_fold(x), x) != x):
+        nlb = renamed.get(_fold(lb), lb)
+        if merge and nlb in out:
+            out[nlb] = out[nlb] + table[lb]
+        else:
+            out.setdefault(nlb, table[lb])
+    return out
 
 
 # ───────────────── 지도 손보기 (concepts-overrides.yaml) ─────────────────
@@ -586,15 +865,32 @@ def propagate_domains(domain_of, edges, labels):
     return domain_of, len(filled)
 
 
-def main():
-    mastery = parse_mastery()
-    edges, domain_of = parse_concept_map()
-
-    labels = set(mastery.keys())
+def _labels_of(mastery, edges, domain_of=()):
+    labels = set(mastery)
     for t, p in edges:
         labels.add(t)
         labels.add(p)
-    sources = collect_sources(sorted(labels))
+    return labels | set(domain_of)
+
+
+def main():
+    # 재료를 어디서 얻을지만 여기서 갈린다 — 아래 파이프라인은 두 모드가 함께 쓴다.
+    # **빈 레지스트리는 모드를 켜지 않는다.** 템플릿이 함께 주는 견본(`concepts: []`)이
+    # 노트 모드를 꺼 버리면, 아무것도 안 한 사용자의 그래프가 이유 없이 비어 버린다.
+    registry = load_registry()
+    n_note_concepts = n_note_edges = 0
+    if registry:
+        mastery, edges, domain_of, sources, ids, anchor_problems = registry_ingredients(registry)
+        # 레지스트리가 이기되, 거기 없는 개념·간선은 노트에서 받는다 — 안 그러면 세션이나
+        # 앱이 새로 만든 `## 개념 지도`가 그래프에 영영 안 들어간다.
+        n_note_concepts, n_note_edges = merge_note_ingredients(
+            mastery, edges, domain_of, sources, ids
+        )
+    else:
+        ids, anchor_problems = {}, []
+        mastery = parse_mastery()
+        edges, domain_of = parse_concept_map()
+        sources = collect_sources(sorted(_labels_of(mastery, edges)))
 
     # 지도 손보기 — 사용자가 감추거나 이름을 합친 것. 분야 정규화보다 **먼저** 한다:
     # 감춘 개념까지 분야를 채우고 이웃에 전파하면, 지운 것이 지도에 자국을 남긴다.
@@ -603,20 +899,22 @@ def main():
         edges, domain_of, mastery, n_dropped = apply_overrides(
             edges, domain_of, mastery, hidden, renamed
         )
-        labels = set(mastery.keys())
-        for t, p in edges:
-            labels.add(t)
-            labels.add(p)
-        labels |= set(domain_of)
-        sources = collect_sources(sorted(labels))
+        if registry:
+            # 레지스트리 모드는 근거를 노트에서 다시 긁지 않는다(앵커가 정한다).
+            # 그래서 이름이 바뀐 만큼 표를 옮겨 준다.
+            ids = _rename_keys(ids, renamed)
+            sources = _rename_keys(sources, renamed, merge=True)
+        else:
+            sources = collect_sources(sorted(_labels_of(mastery, edges, domain_of)))
     else:
         n_dropped = 0
+    labels = _labels_of(mastery, edges, domain_of)
 
     # 분야 정규화 — 별칭 합치기 → 미분류 전파. 둘 다 안전 기본값(못 정하면 안 바꾼다).
     domain_of, n_merged = normalize_domains(domain_of, load_subjects())
     domain_of, n_filled = propagate_domains(domain_of, edges, labels | set(domain_of))
 
-    data = build(mastery, edges, domain_of, sources)
+    data = build(mastery, edges, domain_of, sources, ids)
 
     n = len(data["concepts"])
     n_drills = len(data["drills"])
@@ -632,9 +930,21 @@ def main():
     with open(OUT, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=1, sort_keys=False)
     print(
-        f"✅ {OUT} — 개념 {n} · 선수관계 {n_edges} · 설명가능 {n_mastered} · "
-        f"원문 근거 {n_sources}조각 · 분야 {n_domains}개"
+        f"✅ {OUT}{' (레지스트리 모드)' if registry else ''} — 개념 {n} · 선수관계 {n_edges} · "
+        f"설명가능 {n_mastered} · 원문 근거 {n_sources}조각 · 분야 {n_domains}개"
     )
+    if n_note_concepts or n_note_edges:
+        print(f"   ➕ 레지스트리 밖에서 개념 {n_note_concepts}개 · 선수관계 {n_note_edges}개를 "
+              "노트에서 받았다(daily · materials의 `## 개념 지도`).")
+        print("      큐레이션에 넣고 싶으면 knowledge/concepts.yaml로 옮겨 적는다. "
+              "이름이 겹쳐 보이면 concepts-overrides.yaml의 renamed로 합친다.")
+    if anchor_problems:
+        # 실패시키지 않는다 — 기록이 먼저다. 다만 조용히 넘어가지도 않는다.
+        print(f"   ⚠️ 레지스트리 문제 {len(anchor_problems)}건 (개념은 남고 그 근거만 빈다):")
+        for p in anchor_problems[:20]:
+            print(f"      - {p}")
+        if len(anchor_problems) > 20:
+            print(f"      - … 외 {len(anchor_problems) - 20}건")
     if n_drills:
         print(f"   📇 항목(회상 대상) {n_drills}개는 그래프에서 뺐다 — 그래프는 설명 대상만 담는다.")
         for d in data["drills"][:6]:

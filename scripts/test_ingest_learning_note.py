@@ -16,8 +16,10 @@
   ③ 두 절이 **없어도 경고가 뜨지 않는다** — 안 한 전이는 안 한 것이지 결함이 아니다.
      여기서 자동 보정이 끼면 매 세션 잔소리가 붙고, 그러면 사람이 형식을 버린다.
 """
+import json
 import os
 import sys
+import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import ingest_learning_note as ingest  # noqa: E402
@@ -483,6 +485,102 @@ updated: 2026-08-02
                                    "2026-08-07", path=path)
         check("복습 질문은 여전히 교체된다",
               "왜 Open Circuit인가" not in open(path, encoding="utf-8").read())
+
+    # ── `[자료]` 라벨은 사실을 말한다 ────────────────────────────────────────
+    #
+    # 2026-08-09: 앱에서 PDF를 파싱해 초안만 만들고 세션 없이 닫으면 본문 전체가 원문인데도
+    # frontmatter가 조건 없이 `distilled`를 적고 있었다(실측 102KB, `## ` 헤딩은
+    # `러너에게`·`원문` 둘뿐). 조용한 거짓말이라 저작권 판단까지 오도한다.
+    print("\n[자료] 증류 라벨")
+    APP_DRAFT = {"number": 7, "title": "[자료] 2026-08-09 piercing — Threshold Crossing",
+                 "body": "## 러너에게\n읽어라\n\n## 원문\n" + "본문 " * 50}
+    REAL = {"number": 8, "title": "[자료] 2026-08-09 cs224n — Lecture 8",
+            "body": "## 요약\n목차 수준의 지도\n\n## 개념 지도\n- 어텐션 ← 내적\n\n"
+                    "## 빈칸 문제\n1. ___은 쿼리와 키의 내적이다."}
+
+    drafted = ingest.build_material(APP_DRAFT, "2026-08-09")
+    check("증류 없는 원문은 raw로 적힌다", "tags: [material, raw]" in drafted["content"],
+          drafted["content"][:200])
+    check("증류 없는 원문에 distilled가 안 붙는다", "distilled]" not in drafted["content"])
+    check("source가 증류를 주장하지 않는다", "증류 없음" in drafted["content"])
+    check("build_material이 판정을 돌려준다", drafted["distilled"] is False)
+
+    real = ingest.build_material(REAL, "2026-08-09")
+    check("실제 증류본은 distilled로 적힌다", "tags: [material, distilled]" in real["content"],
+          real["content"][:200])
+    check("실제 증류본의 source는 증류를 말한다", "자료 증류 →" in real["content"])
+    check("실제 증류본 판정", real["distilled"] is True)
+
+    # 판정 기준 자체 — `## 개념 지도`가 파이프라인이 실제로 먹는 절이다.
+    check("개념 지도가 있으면 증류", ingest.is_distilled("## 개념 지도\n- A ← B"))
+    check("이모지·주석이 붙어도 잡는다", ingest.is_distilled("## 🗺️ 개념 지도 (초안)\n- A ← B"))
+    check("요약만 있으면 증류가 아니다", not ingest.is_distilled("## 요약\n지도"))
+    check("빈 본문은 증류가 아니다", not ingest.is_distilled(""))
+
+    # ── 증류 / 원문 가르기 (앱이 `## 원문`을 경계로 초안을 만든다) ─────────────
+    print("\n[자료] 증류·원문 가르기")
+    check("경계가 없으면 안 가른다", ingest.split_source("## 요약\n지도")[1] is None)
+    head, src = ingest.split_source("## 요약\n지도\n\n## 원문\n\n본문이다")
+    check("경계 앞이 증류", "## 요약" in head and "본문이다" not in head)
+    check("경계 뒤가 원문", src.strip() == "본문이다")
+
+    APP_DISTILLED = {"number": 9, "title": "[자료] 2026-08-09 attention — Attention Is All You Need",
+                     "body": "# Attention\n\n## 요약\n- 어텐션이 순환을 대체\n\n"
+                             "## 개념 지도\n### 딥러닝\n- 어텐션 ← 내적\n\n"
+                             "## 빈칸 문제\n1. ___\n\n## 원문\n\n### 1 Introduction\n\nRecurrent models…"}
+    folded = ingest.build_material(APP_DISTILLED, "2026-08-09")
+    check("증류가 있으면 폴더형으로 나뉜다", folded["source"] is not None)
+    check("증류본은 distilled", "tags: [material, distilled]" in folded["content"])
+    check("원문은 source", "tags: [material, source]" in folded["source"])
+    check("개념 지도는 증류본에만 있다",
+          "## 개념 지도" in folded["content"] and "## 개념 지도" not in folded["source"])
+    check("원문이 그대로 보존된다", "Recurrent models" in folded["source"])
+    # 원문 쪽에 개념 지도가 없어야 빌더가 같은 간선을 두 번 읽지 않는다(materials/** 전부를 본다).
+    check("증류본에 원문이 섞이지 않는다", "Recurrent models" not in folded["content"])
+
+    # 증류가 없으면 나눌 것이 하나뿐이라 빈 distilled.md를 만들지 않는다.
+    only_raw = ingest.build_material(APP_DRAFT, "2026-08-09")
+    check("증류가 없으면 단일 파일", only_raw["source"] is None)
+
+    print("\n[자료] 같은 Issue를 다시 보내도 파일이 늘지 않는다")
+    with tempfile.TemporaryDirectory() as tmp:
+        cwd = os.getcwd()
+        try:
+            os.chdir(tmp)
+            os.makedirs("materials/old-single", exist_ok=True)
+            with open("materials/plain.md", "w", encoding="utf-8") as f:
+                f.write("---\nsource_issue: 42\n---\n")
+            with open("materials/old-single/distilled.md", "w", encoding="utf-8") as f:
+                f.write("---\nsource_issue: 43\n---\n")
+            check("단일 파일형을 찾는다", ingest.existing_material_slug(42) == "plain")
+            check("폴더형을 찾는다", ingest.existing_material_slug(43) == "old-single")
+            check("없으면 None", ingest.existing_material_slug(99) is None)
+        finally:
+            os.chdir(cwd)
+
+    print("\n[자료] 단일 파일 → 폴더형으로 올라갈 때 옛 파일이 남지 않는다")
+    with tempfile.TemporaryDirectory() as tmp:
+        cwd = os.getcwd()
+        try:
+            os.chdir(tmp)
+            os.makedirs("materials", exist_ok=True)
+            # 전에 증류 없이 저장된 같은 자료(같은 Issue 번호).
+            with open("materials/attention.md", "w", encoding="utf-8") as f:
+                f.write("---\ntags: [material, raw]\nsource_issue: 9\n---\n\n원문뿐\n")
+            with open("payload.json", "w", encoding="utf-8") as f:
+                json.dump(APP_DISTILLED, f)
+            argv = sys.argv
+            sys.argv = ["ingest", "--payload", "payload.json", "--today", "2026-08-09"]
+            try:
+                ingest.main()
+            finally:
+                sys.argv = argv
+            check("폴더형이 생겼다", os.path.isfile("materials/attention/distilled.md")
+                  and os.path.isfile("materials/attention/source.md"))
+            check("옛 단일 파일이 지워졌다", not os.path.exists("materials/attention.md"),
+                  str(os.listdir("materials")))
+        finally:
+            os.chdir(cwd)
 
     # ── 지식 그래프 손보기 (`## 지도` → concepts-overrides.yaml) ──────────────
     #

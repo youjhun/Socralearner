@@ -100,6 +100,13 @@ TRAJECTORY_KEEP = 7
 # 개념의 단위 정의는 runner/instructions.md의 "개념의 단위"에 있다. 여기는 그 저장 경로일 뿐이다.
 DRILLS_SECTION = "드릴 항목"
 DRILLS_PATH = "drills.md"
+
+# `## 개념 지도` — `build_concepts.py`가 선수관계를 읽어 가는 절(그쪽 `SECTION`과 같은 값).
+# 여기서는 `[자료]` 본문이 실제로 증류됐는지 가리는 데 쓴다(`is_distilled`).
+CONCEPT_MAP_SECTION = "개념 지도"
+
+# `## 원문` — 증류와 원문의 경계. 앱이 초안을 이 모양으로 만든다(issueDraft.ts).
+SOURCE_SECTION = "원문"
 DRILLS_HEADER = [
     "---",
     'title: "드릴 항목 (회상 대상)"',
@@ -399,13 +406,67 @@ def ensure_headings(body):
     return body, missing
 
 
+def existing_material_slug(number):
+    """이 Issue로 이미 만든 자료의 slug. 없으면 None.
+
+    같은 Issue를 고쳐 다시 보내도 새 파일이 생기지 않게 한다(제목을 고치면 slug가 바뀐다).
+    단일 파일형(`materials/<slug>.md`)과 폴더형(`materials/<slug>/distilled.md`)을 함께 본다.
+    """
+    marker = f"source_issue: {number}"
+    if not os.path.isdir(MATERIALS_DIR):
+        return None
+    for entry in sorted(os.listdir(MATERIALS_DIR)):
+        full = os.path.join(MATERIALS_DIR, entry)
+        if os.path.isfile(full) and entry.endswith(".md"):
+            with open(full, encoding="utf-8") as f:
+                if marker in f.read(2000):
+                    return entry[: -len(".md")]
+        elif os.path.isdir(full):
+            for name in ("distilled.md", "source.md"):
+                cand = os.path.join(full, name)
+                if os.path.isfile(cand):
+                    with open(cand, encoding="utf-8") as f:
+                        if marker in f.read(2000):
+                            return entry
+    return None
+
+
+def split_source(body):
+    """`## 원문` 경계로 (증류 부분, 원문 부분). 경계가 없으면 (body, None).
+
+    앱이 자료를 올릴 때 증류를 원문 **앞에** 놓고 이 제목을 경계로 둔다
+    (Topdown `lib/sources/issueDraft.ts`). 두 조각은 성격이 다르다 —
+    증류는 파생 학습자료이고 원문은 인용 근거다. 그래서 파일을 나눈다.
+    """
+    m = re.search(r"^##\s*%s\s*$" % re.escape(SOURCE_SECTION), body or "", re.M)
+    if not m:
+        return body, None
+    return body[:m.start()].rstrip(), body[m.end():].lstrip("\n")
+
+
+def is_distilled(body):
+    """이 본문이 **실제로 증류된 것인가** — `## 개념 지도`가 있는가.
+
+    셋 중 이것을 기준으로 삼는 이유: 요약·빈칸 문제는 사람이 읽는 것이지만 `## 개념 지도`는
+    **파이프라인이 실제로 먹는 것**이다(`build_concepts.py`가 materials/에서 선수관계를
+    읽어 간다). 이게 없으면 그래프에 아무것도 안 들어가므로, 증류의 값이 없는 것과 같다.
+    """
+    return bool(re.search(r"^##\s*.*%s" % re.escape(CONCEPT_MAP_SECTION), body or "", re.M))
+
+
 def build_material(payload, today):
-    """`[자료]` Issue → materials/<slug>.md — 강의자료(PDF)를 **1회 증류**한 파생 학습자료.
+    """`[자료]` Issue → materials/<slug>.md — 강의자료를 증류한(또는 못 한) 파생 학습자료.
 
     왜 이 경로인가: Custom GPT Action 응답은 텍스트라 repo의 PDF를 세션에서 읽을 수
     없다. 그래서 PDF는 대화에 한 번 올리고, 요약(지도)·개념 지도·빈칸 문제 은행을
-    텍스트로 남긴다 — 이후 세션은 readFile로 끌어온다. 원문 PDF는 저장하지 않는다
-    (저작권·용량). 정규 헤딩 강제·STATUS/mastery 처리도 하지 않는다(세션 로그가 아니다).
+    텍스트로 남긴다 — 이후 세션은 readFile로 끌어온다.
+    정규 헤딩 강제·STATUS/mastery 처리는 하지 않는다(세션 로그가 아니다).
+
+    **라벨은 사실을 말한다.** 2026-08-09: 앱에서 PDF를 파싱해 초안만 만들고 세션 없이
+    닫으면 본문 전체가 원문인데도 frontmatter가 조건 없이 `distilled`를 적고 있었다
+    (실측: 102KB 전부 원문, `## ` 헤딩은 `러너에게`·`원문` 둘뿐). 조용한 거짓말이라
+    "이 파일은 증류본이니 원문이 아니다"라는 저작권 판단까지 오도한다. 그래서 본문을
+    보고 정한다 — 증류가 있으면 `distilled`, 없으면 `raw`.
     """
     raw = assemble(payload)
     user_fm, body = split_frontmatter(raw)
@@ -417,20 +478,46 @@ def build_material(payload, today):
     display = (tail or head).strip()
     display = re.sub(r"^\s*\[[^\]]*\]\s*", "", display).strip()
     display = re.sub(r"^\d{4}-\d{2}-\d{2}\s*", "", display).strip() or slug
-    fm = [
-        "---",
-        f'title: "{display}"',
-        f"created: {today}",
-        f"updated: {today}",
-        "tags: [material, distilled]",
-        f'source: "자료 증류 → Issue #{payload.get("number")} (원문 PDF는 저장하지 않음)"',
-        "kind: material",
-        f"source_issue: {payload.get('number')}",
-        "---",
-    ]
-    if not re.match(r"^#\s", body):
-        body = f"# {display}\n\n" + body
-    return {"slug": slug, "content": "\n".join(fm) + "\n\n" + body.rstrip() + "\n"}
+    head, source_body = split_source(body)
+    distilled = is_distilled(head if source_body is not None else body)
+
+    def frontmatter(tag, source_line):
+        return "\n".join([
+            "---",
+            f'title: "{display}"',
+            f"created: {today}",
+            f"updated: {today}",
+            f"tags: [material, {tag}]",
+            f'source: "{source_line} → Issue #{payload.get("number")}"',
+            "kind: material",
+            f"source_issue: {payload.get('number')}",
+            "---",
+        ])
+
+    def page(text, tag, source_line):
+        if not re.match(r"^#\s", text):
+            text = f"# {display}\n\n" + text
+        return frontmatter(tag, source_line) + "\n\n" + text.rstrip() + "\n"
+
+    # 증류가 실제로 있을 때만 폴더형으로 나눈다. 증류가 없으면 나눌 것이 하나뿐이라
+    # 빈 `distilled.md`를 만드는 대신 지금까지처럼 단일 파일로 둔다(경로 계약은 둘 다 허용).
+    if distilled and source_body is not None:
+        return {
+            "slug": slug,
+            "distilled": True,
+            "content": page(head, "distilled", "자료 증류"),
+            "source": page(source_body, "source", "원문 텍스트 (그대로 보존)"),
+        }
+    return {
+        "slug": slug,
+        "distilled": distilled,
+        "content": page(
+            body,
+            "distilled" if distilled else "raw",
+            "자료 증류" if distilled else "원문 텍스트 (증류 없음)",
+        ),
+        "source": None,
+    }
 
 
 def build_note(payload, today):
@@ -1723,29 +1810,64 @@ def main():
     # `[자료]` — 세션 로그가 아니라 증류된 학습자료다. 별도 경로로 저장하고 끝낸다.
     if (payload.get("title") or "").startswith("[자료]"):
         note = build_material(payload, args.today)
-        path = os.path.join(MATERIALS_DIR, f"{note['slug']}.md")
-        marker = f"source_issue: {payload.get('number')}"
-        if os.path.isdir(MATERIALS_DIR):
-            for name in sorted(os.listdir(MATERIALS_DIR)):
-                if name.endswith(".md"):
-                    cand = os.path.join(MATERIALS_DIR, name)
-                    with open(cand, encoding="utf-8") as f:
-                        if marker in f.read(2000):
-                            path = cand
-                            break
+        slug = existing_material_slug(payload.get("number")) or note["slug"]
+
+        if note["source"] is not None:
+            # 폴더형 — 증류와 원문을 나눈다. 경로 계약은 Topdown `materialPaths.ts`의
+            # `MATERIAL_RE`가 이미 허용한다(`materials/<slug>/(source|distilled).md`).
+            folder = os.path.join(MATERIALS_DIR, slug)
+            writes = [
+                (os.path.join(folder, "distilled.md"), note["content"]),
+                (os.path.join(folder, "source.md"), note["source"]),
+            ]
+            # 같은 자료가 전에 단일 파일로 저장돼 있었다면 지운다. 남겨 두면 같은 개념
+            # 지도가 두 번 읽혀 그래프에 중복 간선이 생긴다(빌더는 materials/**를 다 본다).
+            stale = os.path.join(MATERIALS_DIR, f"{slug}.md")
+        else:
+            writes = [(os.path.join(MATERIALS_DIR, f"{slug}.md"), note["content"])]
+            stale = None
+
         if args.dry_run:
-            print(f"[dry-run] {path}\n")
-            print(note["content"])
+            for path, content in writes:
+                print(f"[dry-run] {path}\n")
+                print(content)
             return
-        os.makedirs(MATERIALS_DIR, exist_ok=True)
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(note["content"])
-        report = [
-            f"✅ 자료 지도 저장 — `{path}` ({len(note['content'].splitlines())}줄)",
-            "",
-            "- 원문 PDF는 저장하지 않았다(저작권·용량) — 요약·개념 지도·빈칸 문제 은행만 남는다.",
-            "- 다음 세션부터 러너가 이 파일을 readFile로 끌어와 쓴다.",
-        ]
+        for path, content in writes:
+            os.makedirs(os.path.dirname(path) or MATERIALS_DIR, exist_ok=True)
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(content)
+        if stale and os.path.isfile(stale):
+            os.remove(stale)
+
+        path = writes[0][0]
+        lines = len(note["content"].splitlines())
+        if note["source"] is not None:
+            src_lines = len(note["source"].splitlines())
+            report = [
+                f"✅ 자료 저장 — 증류 `{path}` ({lines}줄) · 원문 `{writes[1][0]}` ({src_lines}줄)",
+                "",
+                "- 요약·개념 지도·빈칸 문제 은행이 증류본에 있다 — `## 개념 지도`는 그래프로 간다.",
+                "- 원문은 그대로 보존됐다 — 인용 근거이고, 러너가 `read_doc`으로 읽을 수 있다.",
+            ]
+        elif note["distilled"]:
+            report = [
+                f"✅ 자료 지도 저장 — `{path}` ({lines}줄)",
+                "",
+                "- 요약·개념 지도·빈칸 문제 은행이 들어 있다 — `## 개념 지도`는 그래프로 간다.",
+                "- 다음 세션부터 러너가 이 파일을 readFile로 끌어와 쓴다.",
+            ]
+        else:
+            # 증류를 대신 해 주지 않는다(이 CI는 LLM 토큰 0이 원칙이다). 대신 무엇이 저장됐고
+            # 무엇이 없는지 정확히 말한다 — 라벨과 보고가 어긋나면 저작권 판단까지 오도한다.
+            report = [
+                f"✅ 자료 원문 저장 — `{path}` ({lines}줄)",
+                "",
+                "- ⚠️ **증류는 없다** — `## 개념 지도`가 없어 `tags: [material, raw]`로 적었다.",
+                "  그래프에 들어가는 것은 없다(선수관계는 `## 개념 지도`에서만 읽는다).",
+                "- 세션에서 이 자료를 증류하려면 러너에게 "
+                "`이 자료 증류해줘 — 요약·개념 지도·빈칸 문제로.`라고 한다.",
+                "- 다음 세션부터 러너가 이 파일을 readFile로 끌어와 쓴다.",
+            ]
         text = "\n".join(report)
         print(text)
         if args.report:

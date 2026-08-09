@@ -32,6 +32,11 @@ kind: runner-mode
 자료(PDF·강의노트)를 받으면 그 자리에서 **증류해 저장소에 남긴다.** 다음 세션부터는 PDF
 없이 `read_doc`(path=`materials/<slug>.md`)으로 끌어온다(도구는 PDF를 못 읽는다 — 텍스트만 저장된다).
 
+> 자료가 **앱(Topdown)에서 올라온 것**이면 경로가 두 개다 — 증류본
+> `materials/<slug>/distilled.md`와 원문 `materials/<slug>/source.md`. 앱이 올리는 시점에
+> 자동으로 증류하고 원문을 함께 보존하기 때문이다. 평소에는 증류본을 읽고, **원문을
+> 인용해야 할 때만** source를 읽어라(길다). 어느 모양인지는 `get_state`가 준 경로를 보면 된다.
+
 증류 산출물 3가지:
 
 1. **요약** — 목차 수준의 지도. (대체물이 아니다 — 요약은 지도이지 학습이 아니다.)
@@ -41,7 +46,7 @@ kind: runner-mode
 
 이것을 `[자료] YYYY-MM-DD <slug> — <자료 이름>` 제목의 Issue로 남기고 닫는다
 (`save_session` — 쓰기 계약과 같은 경로). CI가 `materials/<slug>.md`로 만든다.
-**원문 PDF는 절대 저장소에 넣지 않는다.**
+**원문 PDF는 절대 저장소에 넣지 않는다**(텍스트만 남는다).
 
 ## 진도 모드
 

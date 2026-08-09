@@ -71,6 +71,10 @@ NEVER = (
     "topics.yaml",
     "tracks.yaml",  # 내가 나눈 학습 서랍 — 덮어쓰면 세션 저장 위치가 흔들린다
     "subjects.yaml",  # 분야 목록 — 학습자의 것이다(topics.yaml과 같은 성격)
+    # 개념 레지스트리 — 학습자가 손으로 쌓은 그래프의 SSOT다. 템플릿은 빈 견본만 주고,
+    # 채워진 것은 절대 덮지 않는다. SYNC에 `scripts/`가 통째로 들어 있어 목록이 조금만
+    # 넓어져도 사고가 나므로, 지금 안 겹치더라도 **명시로 막아 둔다**(NEVER가 SYNC를 이긴다).
+    "knowledge/",
     "README.md",
     "pilot/",  # 파일럿 롤업 산출물 — 내 저장소에서 계산된 내 수치다(pilot_rollup.py)
 )
@@ -85,10 +89,31 @@ NEVER = (
 #
 # 그래서 **create-only**로 연다: 없으면 템플릿의 빈 견본을 놓고, 있으면 절대 손대지 않는다.
 # NEVER의 뜻은 "덮어쓰지 마라"이지 "만들지도 마라"가 아니다.
-SEED_IF_MISSING = ("subjects.yaml", "tracks.yaml", "topics.yaml")
+SEED_IF_MISSING = (
+    "subjects.yaml", "tracks.yaml", "topics.yaml",
+    # 빈 견본. 비어 있는 동안은 노트 모드가 그대로 돌고, 채우면 그때부터 그래프의 SSOT가 된다.
+    "knowledge/concepts.yaml",
+    # 지도 손보기(감추기·이름 합치기). 없어도 조용히 동작하지만, **파일이 없으면 이런 손잡이가
+    # 있다는 것 자체를 모른다.** 앱의 "감추기" 버튼이 쓰는 파일이라 빈 견본을 놓아 둔다.
+    "concepts-overrides.yaml",
+)
 
 
 WORKFLOW_DIR = ".github/workflows/"
+
+# 소스가 아닌 것 — 동기화가 남의 저장소에 컴파일 산출물을 심지 않게 한다.
+# 템플릿에서는 `.gitignore`가 막지만 이 스크립트는 **작업 트리를 걷는다**. 그래서 로컬에서
+# 테스트를 한 번 돌린 뒤 동기화하면 `scripts/__pycache__/*.pyc`가 그대로 딸려 가고,
+# 받는 쪽 저장소에는 `.gitignore`가 없을 수도 있어 그대로 커밋된다.
+IGNORE_DIRS = ("__pycache__", ".git", ".pytest_cache", "node_modules")
+IGNORE_SUFFIXES = (".pyc", ".pyo")
+
+
+def is_junk(rel):
+    """소스가 아닌 산출물인가 — 컴파일 캐시 따위."""
+    rel = rel.replace(os.sep, "/")
+    parts = rel.split("/")
+    return any(d in parts for d in IGNORE_DIRS) or rel.endswith(IGNORE_SUFFIXES)
 
 
 def is_workflow(rel):
@@ -119,10 +144,11 @@ def candidate_files(src_root):
                 for fn in filenames:
                     full = os.path.join(dirpath, fn)
                     rel = os.path.relpath(full, src_root).replace(os.sep, "/")
-                    if not is_protected(rel):
+                    if not is_protected(rel) and not is_junk(rel):
                         out.append(rel)
         else:
-            if os.path.isfile(os.path.join(src_root, entry)) and not is_protected(entry):
+            if (os.path.isfile(os.path.join(src_root, entry))
+                    and not is_protected(entry) and not is_junk(entry)):
                 out.append(entry)
     return sorted(set(out))
 
