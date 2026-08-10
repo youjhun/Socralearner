@@ -154,6 +154,14 @@ UNDERSTANDING = ("미이해", "부분 이해", "기능적 이해", "비판적 �
 READING_STATUS_SECTION = "READING_STATUS 갱신"
 READING_STATUS_PATH = os.path.join(PAPERS_DIR, "READING_STATUS.md")
 
+# 자료(렉노·교재)의 진도. 논문이 `papers/READING_STATUS.md`로 하던 것과 **같은 기계**다 —
+# 세션 노트에 절을 하나 남기면 CI가 파일에 옮겨 적는다.
+#
+# 왜 필요한가: 원문을 절 단위로 읽게 되면서 "오늘 어느 절부터인가"가 세션의 첫 물음이 됐다.
+# 기록이 없으면 러너가 daily 노트에서 짐작해야 하고, 짐작이 틀리면 이미 한 절을 또 한다.
+MATERIAL_STATUS_SECTION = "자료 진도 갱신"
+MATERIAL_STATUS_PATH = os.path.join(MATERIALS_DIR, "READING_STATUS.md")
+
 # ─────────────────────────── 설정 (`[설정]`) ───────────────────────────
 #
 # 2026-08-04: `topics.yaml`을 사람이 손으로 쓰게 하는 것이 병목이었다. YAML 문법이
@@ -579,6 +587,7 @@ def build_note(payload, today):
     user_fm = {**directives, **user_fm}
 
     body, status_patch = extract_status_patch(body)
+    body, material_patch = extract_status_patch(body, MATERIAL_STATUS_SECTION)
     body, mastery = pop_section(body, MASTERY_SECTION)
     body, drills = pop_section(body, DRILLS_SECTION)
     body, missing = ensure_headings(body)
@@ -632,6 +641,7 @@ def build_note(payload, today):
         "slug": slug,
         "content": "\n".join(fm) + "\n\n" + body.rstrip() + "\n",
         "status_patch": status_patch,
+        "material_patch": material_patch,
         "mastery": mastery,
         "drills": drills,
         "track": user_fm.get("track", ""),
@@ -1229,6 +1239,27 @@ kind: reading-status
 - (다음 세션의 시작점 한 줄)
 """
 
+MATERIAL_STATUS_TEMPLATE = """---
+title: "자료 진도 — 어느 자료 어느 절까지"
+updated: {today}
+kind: reading-status
+---
+
+# 자료 진도
+
+> 렉처노트·교재를 이어 읽을 때 러너가 먼저 읽는 파일.
+> 세션이 끝나면 Issue의 `## 자료 진도 갱신` 절로 갱신된다.
+> 절 이름은 그 자료 증류본의 `## 원문 목차`에 있는 것을 그대로 쓴다.
+
+## Progress
+
+- (아직 없음)
+
+## Next Session
+
+- (다음 세션에 열 자료와 절 한 줄)
+"""
+
 
 def build_topics(payload):
     """`[설정]` Issue의 `## 주제` 절 → [{id, label, query, seed, …}].
@@ -1664,14 +1695,22 @@ def merge_topics(new, path=TOPICS_PATH):
     return added, updated, removed
 
 
-def ensure_reading_status(today):
+def ensure_status_file(path, template, today):
     """없으면 만든다 — 있으면 손대지 않는다(학습자의 기록이다)."""
-    if os.path.exists(READING_STATUS_PATH):
+    if os.path.exists(path):
         return False
-    os.makedirs(PAPERS_DIR, exist_ok=True)
-    with open(READING_STATUS_PATH, "w", encoding="utf-8") as f:
-        f.write(READING_STATUS_TEMPLATE.format(today=today))
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(template.format(today=today))
     return True
+
+
+def ensure_reading_status(today):
+    return ensure_status_file(READING_STATUS_PATH, READING_STATUS_TEMPLATE, today)
+
+
+def ensure_material_status(today):
+    return ensure_status_file(MATERIAL_STATUS_PATH, MATERIAL_STATUS_TEMPLATE, today)
 
 
 # --------------------------------------------------------------------------- main
@@ -1957,6 +1996,14 @@ def main():
     with open(path, "w", encoding="utf-8") as f:
         f.write(note["content"])
     applied = apply_status_patch(note["status_patch"], args.today)
+    # 자료 진도 — 논문의 READING_STATUS와 같은 기계다(절 교체). 절이 없으면 아무 일도 없다.
+    # `applied`에 섞지 않는다 — 섞으면 보고가 "STATUS.md 갱신"이라고 거짓말한다.
+    material_applied = []
+    if note["material_patch"]:
+        ensure_material_status(args.today)
+        material_applied = apply_section_patch(
+            note["material_patch"], args.today, path=MATERIAL_STATUS_PATH
+        )
     if append_trajectory(note["display"], note["date"], path, args.today):
         applied.append(TRAJECTORY_SECTION)
     promoted = write_mastery_fragment(note["mastery"], note["track"], note["date"], note["slug"], path)
@@ -1974,6 +2021,10 @@ def main():
         report.append(f"- {track_note}")
     if applied:
         report.append(f"- STATUS.md 갱신: {', '.join(applied)}")
+    if material_applied:
+        report.append(
+            f"- 자료 진도 갱신: `{MATERIAL_STATUS_PATH}` — {', '.join(material_applied)}"
+        )
     if promoted:
         report.append(f"- 이해도 승급 조각: `{promoted}`" if promoted.endswith(".md") else f"- {promoted}")
     if drilled:

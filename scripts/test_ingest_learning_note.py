@@ -621,6 +621,62 @@ updated: 2026-08-02
         finally:
             os.chdir(cwd)
 
+    # ── 자료 진도 — 논문의 READING_STATUS와 같은 기계 ────────────────────────
+    #
+    # 원문을 절 단위로 읽게 되면서 "오늘 어느 절부터인가"가 세션의 첫 물음이 됐다.
+    # 기록이 없으면 러너가 daily에서 짐작하고, 짐작이 틀리면 이미 한 절을 또 한다.
+    print("\n[학습] 자료 진도 갱신")
+    with tempfile.TemporaryDirectory() as tmp:
+        cwd = os.getcwd()
+        try:
+            os.chdir(tmp)
+            os.makedirs("daily")
+            with open("STATUS.md", "w", encoding="utf-8") as f:
+                f.write("---\n---\n## 지금 약한 것\n- x\n")
+            with open("payload.json", "w", encoding="utf-8") as f:
+                json.dump({
+                    "number": 20, "title": "[학습] 2026-08-10 attn — 어텐션",
+                    "body": "## 목표\n- 어텐션\n\n## 오늘 직접 학습한 지식\n1. 어텐션은 내적이다\n\n"
+                            "## 자료 진도 갱신\n### Progress\n- cs224n §3.2.1 까지\n"
+                            "### Next Session\n- cs224n §3.2.2\n",
+                }, f)
+            argv = sys.argv
+            sys.argv = ["ingest", "--payload", "payload.json", "--today", "2026-08-10"]
+            try:
+                ingest.main()
+            finally:
+                sys.argv = argv
+
+            status = open("materials/READING_STATUS.md", encoding="utf-8").read()
+            check("자료 진도가 파일로 남는다", "cs224n §3.2.1 까지" in status, status)
+            check("다음 세션 시작점도 남는다", "cs224n §3.2.2" in status)
+            note = open(f"daily/{os.listdir('daily')[0]}", encoding="utf-8").read()
+            check("진도 절은 세션 노트에 안 남는다(파일로 옮겨졌다)", "자료 진도 갱신" not in note)
+        finally:
+            os.chdir(cwd)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        cwd = os.getcwd()
+        try:
+            os.chdir(tmp)
+            os.makedirs("daily")
+            with open("STATUS.md", "w", encoding="utf-8") as f:
+                f.write("---\n---\n## 지금 약한 것\n- x\n")
+            with open("payload.json", "w", encoding="utf-8") as f:
+                json.dump({"number": 21, "title": "[학습] 2026-08-10 x — X",
+                           "body": "## 목표\n- x\n\n## 오늘 직접 학습한 지식\n1. 배운 것이 있다\n"}, f)
+            argv = sys.argv
+            sys.argv = ["ingest", "--payload", "payload.json", "--today", "2026-08-10"]
+            try:
+                ingest.main()
+            finally:
+                sys.argv = argv
+            # 절을 안 남긴 세션이 빈 진도 파일을 만들면 "진도가 없다"가 아니라 "0이다"로 읽힌다.
+            check("진도 절이 없으면 파일을 만들지 않는다",
+                  not os.path.exists("materials/READING_STATUS.md"))
+        finally:
+            os.chdir(cwd)
+
     # ── 지식 그래프 손보기 (`## 지도` → concepts-overrides.yaml) ──────────────
     #
     # 노드는 daily 노트에서 매번 다시 만들어지므로 진짜 "삭제"는 노트를 고치는 일이 된다.
