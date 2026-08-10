@@ -107,6 +107,23 @@ subject_mode = (ROOT / "runner" / "subject-mode.md").read_text(encoding="utf-8")
 check("과목 모드가 `[자료]` 증류 규약을 갖고 있다", "[자료]" in subject_mode,
       "증류 Issue 규약이 사라지면 materials/가 영영 안 만들어진다")
 
+# 원문 근거 계약 — 이게 빠지면 러너가 요약으로 시험을 내고, 요약에서 빠진 것은
+# 학습자가 자기가 모르는 줄도 모르게 된다. 계약의 손잡이 이름들을 못박는다.
+for needle, why in [
+    ("원문에 근거해 진행한다", "계약 절이 사라지면 러너가 증류본만 읽는다"),
+    ("materialStatus", "오늘 어디부터인지를 짐작하게 되면 이미 한 절을 또 한다"),
+    ("## 원문 목차", "절을 고를 지도가 없으면 원문을 통째로 받게 된다"),
+    ("sourceAnchors", "앵커가 없으면 원문을 읽었는지 확인할 길이 없다"),
+    ("## 자료 진도 갱신", "진도를 안 남기면 다음 세션이 짐작한다"),
+]:
+    check(f"과목 모드에 `{needle}`가 있다", needle in subject_mode, why)
+
+# 논문도 같은 계약을 따른다 — 문구가 갈리면 종류마다 다르게 행동한다.
+paper_mode_text = (ROOT / "runner" / "paper-mode.md").read_text(encoding="utf-8")
+check("논문 모드가 원문 근거 계약을 가리킨다",
+      "원문에 근거해 진행한다" in paper_mode_text and "subject-mode.md" in paper_mode_text,
+      "논문만 계약 밖이면 정제본(=학습자가 이미 아는 것)만 보고 시험을 내게 된다")
+
 # 연구 모드는 새 Issue 종류를 만들지 않는다 — 기존 `[학습]` + `artifact:`를 쓴다.
 # 여기서 새 접두어를 지어내면 CI 게이트가 모르는 Issue가 되어 조용히 사라진다.
 research_mode = (ROOT / "runner" / "research-mode.md").read_text(encoding="utf-8")
