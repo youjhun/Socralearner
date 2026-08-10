@@ -499,11 +499,28 @@ updated: 2026-08-02
                     "## 빈칸 문제\n1. ___은 쿼리와 키의 내적이다."}
 
     drafted = ingest.build_material(APP_DRAFT, "2026-08-09")
-    check("증류 없는 원문은 raw로 적힌다", "tags: [material, raw]" in drafted["flat"],
-          drafted["flat"][:200])
-    check("증류 없는 원문에 distilled가 안 붙는다", "distilled]" not in drafted["flat"])
-    check("source가 증류를 주장하지 않는다", "증류 없음" in drafted["flat"])
+    drafted_src = drafted["files"]["source.md"]
+    check("증류 없는 원문에 distilled가 안 붙는다", "distilled]" not in drafted_src)
+    check("source가 증류를 주장하지 않는다", "증류 없음" in drafted_src)
     check("build_material이 판정을 돌려준다", drafted["distilled"] is False)
+
+    # 증류가 없어도 **원문은 약속한 자리에 그냥 저장된다**(유지훈 2026-08-10).
+    # 증류 성공 여부로 경로가 바뀌면 앱이 화면에 적은 `<root>/<slug>/source.md`가 거짓이
+    # 되고, 러너의 `read_doc`이 404를 받는다 — 도구를 버리게 만드는 그 실패다.
+    check("증류가 없어도 원문은 source.md에 남는다", set(drafted["files"]) == {"source.md"})
+    check("빈 distilled.md를 만들지 않는다(자료)", "distilled.md" not in drafted["files"])
+    check("원문이 온전하다", "본문 본문" in drafted_src)
+    # 증류본이 없으면 머리말이 갈 곳이 없다 — 버리지 않고 원문 앞에 둔다.
+    check("머리말이 보존된다", "읽어라" in drafted_src)
+    check("증류 없는 자료도 폴더형", drafted["flat"] is None)
+
+    # 손으로 쓴 노트에는 `## 원문` 경계가 없다 — 나눌 것이 없으니 그때만 단일 파일이다.
+    flat_only = ingest.build_material(
+        {"number": 70, "title": "[자료] 2026-08-09 memo — 메모",
+         "body": "## 러너에게\n읽어라\n\n경계가 없는 본문"}, "2026-08-09")
+    check("경계가 없으면 단일 파일", flat_only["files"] is None)
+    check("단일 파일은 raw로 적힌다", "tags: [material, raw]" in flat_only["flat"],
+          flat_only["flat"][:200])
 
     real = ingest.build_material(REAL, "2026-08-09")
     check("실제 증류본은 distilled로 적힌다", "tags: [material, distilled]" in real["flat"],
@@ -540,9 +557,8 @@ updated: 2026-08-02
     check("증류본에 원문이 섞이지 않는다", "Recurrent models" not in dist)
     check("자료는 materials/로 간다", folded["root"] == "materials")
 
-    # 증류가 없으면 나눌 것이 하나뿐이라 빈 distilled.md를 만들지 않는다.
-    only_raw = ingest.build_material(APP_DRAFT, "2026-08-09")
-    check("증류가 없으면 단일 파일", only_raw["files"] is None)
+    check("자료도 증류 없이 폴더형", set(
+        ingest.build_material(APP_DRAFT, "2026-08-09")["files"]) == {"source.md"})
 
     # ── 원문 목차 — 어느 절을 열지 고르는 지도 ─────────────────────────────────
     print("\n[자료] 원문 목차")

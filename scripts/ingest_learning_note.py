@@ -536,10 +536,18 @@ def build_material(payload, today):
             text = f"# {display}\n\n" + text
         return frontmatter(tag, source_line) + "\n\n" + text.rstrip() + "\n"
 
-    # 폴더형으로 가르는 때: 원문 경계가 있고 증류가 실제로 있을 때. 논문은 `papers/<slug>/`가
-    # 이미 폴더 규약이라 언제나 폴더다. 증류가 없으면 빈 `distilled.md`를 만들지 않는다 —
-    # 그 빈 껍데기에 `distilled` 딱지가 붙는 것이 이 경로가 고쳐 온 바로 그 거짓말이다.
-    folder = bool(paper_slug) or (distilled and source_body is not None)
+    # 폴더형으로 가르는 때: **원문 경계가 있으면 언제나.** 논문은 `papers/<slug>/`가 이미
+    # 폴더 규약이라 경계가 없어도 폴더다.
+    #
+    # 증류 성공 여부로 가르지 않는다(유지훈 2026-08-10: *"원본도 내가 분명히 그냥 저장하자고
+    # 했었는데 — GPT가 효율적으로 읽고 토큰 절감시킨다고 증류가 목적이지"*). 증류는 러너의
+    # 토큰을 아끼는 **길잡이**이고 원문은 인용 근거다. 길잡이를 못 만들었다고 원문이 있을
+    # 자리가 바뀌면, 앱이 약속한 `<root>/<slug>/source.md`가 거짓이 되고
+    # `read_doc`이 404를 돌려준다 — 러너가 도구를 버리게 만드는 바로 그 실패다.
+    #
+    # 그래도 빈 `distilled.md`는 만들지 않는다(아래) — 그 빈 껍데기에 `distilled` 딱지가
+    # 붙는 것이 이 경로가 고쳐 온 거짓말이다. 없는 파일은 `listMaterials`가 이미 견딘다.
+    folder = bool(paper_slug) or source_body is not None
     if not folder:
         return {
             "slug": slug, "root": root, "distilled": distilled, "files": None,
@@ -552,8 +560,8 @@ def build_material(payload, today):
 
     files = {}
     if source_body is not None:
-        files["source.md"] = page(source_body, "source", "원문 텍스트 (그대로 보존)")
         if distilled:
+            files["source.md"] = page(source_body, "source", "원문 텍스트 (그대로 보존)")
             # 목차를 증류본에 실어 준다 — 러너는 어차피 증류본을 길잡이로 읽는다.
             toc = source_toc(source_body)
             body_with_toc = head if not toc else head.rstrip() + "\n\n" + "\n".join(
@@ -562,6 +570,15 @@ def build_material(payload, today):
                  ""] + [f"- {t}" for t in toc]
             )
             files["distilled.md"] = page(body_with_toc, "distilled", "자료 증류")
+        else:
+            # 증류가 없으면 `distilled.md`를 만들지 않는다. 그러면 머리말(메타 + 러너에게
+            # 남길 일)이 갈 곳이 없으므로 원문 앞에 둔다 — 버리면 "무엇을 왜 올렸나"가
+            # 사라지고, 경계가 아예 없는 경우(아래 else)와도 모양이 어긋난다.
+            files["source.md"] = page(
+                f"{head.rstrip()}\n\n{source_body}" if head.strip() else source_body,
+                "source",
+                "원문 텍스트 (증류 없음)",
+            )
     else:
         # 경계가 없다 = 통째로 증류본이거나 통째로 원문이다.
         files["distilled.md" if distilled else "source.md"] = page(
