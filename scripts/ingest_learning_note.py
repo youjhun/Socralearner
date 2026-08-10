@@ -406,6 +406,30 @@ def ensure_headings(body):
     return body, missing
 
 
+def pop_directives(body, allowed):
+    """본문 맨 앞의 `key: value` 지시행을 떼어낸다 → (지시 dict, 남은 본문).
+
+    앱이 만든 초안은 frontmatter 울타리(`---`) 없이 `slug: …`처럼 맨 윗줄에 적는다.
+    세션 노트(`build_note`)가 쓰던 관례와 같은 것이라 여기 모아 둘이 함께 쓴다.
+    """
+    out, lines = {}, (body or "").splitlines()
+    pattern = r"^(%s)\s*:\s*\S" % "|".join(allowed)
+    while lines and re.match(pattern, lines[0].strip()):
+        key, value = lines[0].split(":", 1)
+        out[key.strip()] = value.strip()
+        lines.pop(0)
+    return out, "\n".join(lines).strip()
+
+
+def source_toc(source_body):
+    """원문의 `### ` 제목 목록. 증류본에 실어 **어느 절을 열지 고르는 지도**로 쓴다.
+
+    `get_state`에 담지 않는 이유: 그러면 자료 수만큼 원문을 통째로 받아야 해서 세션
+    시작이 느려진다. CI는 자료를 가를 때 이미 원문을 손에 들고 있으므로 여기서는 공짜다.
+    """
+    return [m.group(1).strip() for m in re.finditer(r"^###\s+(\S.*)$", source_body or "", re.M)]
+
+
 def existing_material_slug(number):
     """이 Issue로 이미 만든 자료의 slug. 없으면 None.
 
@@ -470,11 +494,16 @@ def build_material(payload, today):
     """
     raw = assemble(payload)
     user_fm, body = split_frontmatter(raw)
+    directives, body = pop_directives(body, ("slug", "paper"))
+    user_fm = {**directives, **user_fm}
     title = payload.get("title") or ""
     head, _, tail = title.partition("—")
     if not tail:
         head, _, tail = title.partition(" - ")
-    slug = user_fm.get("slug") or slugify(head) or f"material-{payload.get('number', '0')}"
+    # `paper:`가 있으면 논문 한 편의 저장소로 간다 — 그 논문의 것은 그 논문 폴더에.
+    paper_slug = (user_fm.get("paper") or "").strip()
+    root = PAPERS_DIR if paper_slug else MATERIALS_DIR
+    slug = paper_slug or user_fm.get("slug") or slugify(head) or f"material-{payload.get('number', '0')}"
     display = (tail or head).strip()
     display = re.sub(r"^\s*\[[^\]]*\]\s*", "", display).strip()
     display = re.sub(r"^\d{4}-\d{2}-\d{2}\s*", "", display).strip() or slug
@@ -499,25 +528,40 @@ def build_material(payload, today):
             text = f"# {display}\n\n" + text
         return frontmatter(tag, source_line) + "\n\n" + text.rstrip() + "\n"
 
-    # 증류가 실제로 있을 때만 폴더형으로 나눈다. 증류가 없으면 나눌 것이 하나뿐이라
-    # 빈 `distilled.md`를 만드는 대신 지금까지처럼 단일 파일로 둔다(경로 계약은 둘 다 허용).
-    if distilled and source_body is not None:
+    # 폴더형으로 가르는 때: 원문 경계가 있고 증류가 실제로 있을 때. 논문은 `papers/<slug>/`가
+    # 이미 폴더 규약이라 언제나 폴더다. 증류가 없으면 빈 `distilled.md`를 만들지 않는다 —
+    # 그 빈 껍데기에 `distilled` 딱지가 붙는 것이 이 경로가 고쳐 온 바로 그 거짓말이다.
+    folder = bool(paper_slug) or (distilled and source_body is not None)
+    if not folder:
         return {
-            "slug": slug,
-            "distilled": True,
-            "content": page(head, "distilled", "자료 증류"),
-            "source": page(source_body, "source", "원문 텍스트 (그대로 보존)"),
+            "slug": slug, "root": root, "distilled": distilled, "files": None,
+            "flat": page(
+                body,
+                "distilled" if distilled else "raw",
+                "자료 증류" if distilled else "원문 텍스트 (증류 없음)",
+            ),
         }
-    return {
-        "slug": slug,
-        "distilled": distilled,
-        "content": page(
+
+    files = {}
+    if source_body is not None:
+        files["source.md"] = page(source_body, "source", "원문 텍스트 (그대로 보존)")
+        if distilled:
+            # 목차를 증류본에 실어 준다 — 러너는 어차피 증류본을 길잡이로 읽는다.
+            toc = source_toc(source_body)
+            body_with_toc = head if not toc else head.rstrip() + "\n\n" + "\n".join(
+                ["## 원문 목차", "",
+                 "> `read_doc`에 `section`으로 이 이름을 그대로 넘기면 그 절의 원문만 받는다.",
+                 ""] + [f"- {t}" for t in toc]
+            )
+            files["distilled.md"] = page(body_with_toc, "distilled", "자료 증류")
+    else:
+        # 경계가 없다 = 통째로 증류본이거나 통째로 원문이다.
+        files["distilled.md" if distilled else "source.md"] = page(
             body,
-            "distilled" if distilled else "raw",
+            "distilled" if distilled else "source",
             "자료 증류" if distilled else "원문 텍스트 (증류 없음)",
-        ),
-        "source": None,
-    }
+        )
+    return {"slug": slug, "root": root, "distilled": distilled, "files": files, "flat": None}
 
 
 def build_note(payload, today):
@@ -1810,21 +1854,22 @@ def main():
     # `[자료]` — 세션 로그가 아니라 증류된 학습자료다. 별도 경로로 저장하고 끝낸다.
     if (payload.get("title") or "").startswith("[자료]"):
         note = build_material(payload, args.today)
-        slug = existing_material_slug(payload.get("number")) or note["slug"]
+        root = note["root"]
+        # 논문은 slug가 지시행으로 못박혀 있다(그 논문 폴더에 들어가야 한다).
+        slug = note["slug"] if root == PAPERS_DIR else (
+            existing_material_slug(payload.get("number")) or note["slug"]
+        )
 
-        if note["source"] is not None:
+        if note["files"] is not None:
             # 폴더형 — 증류와 원문을 나눈다. 경로 계약은 Topdown `materialPaths.ts`의
             # `MATERIAL_RE`가 이미 허용한다(`materials/<slug>/(source|distilled).md`).
-            folder = os.path.join(MATERIALS_DIR, slug)
-            writes = [
-                (os.path.join(folder, "distilled.md"), note["content"]),
-                (os.path.join(folder, "source.md"), note["source"]),
-            ]
+            folder = os.path.join(root, slug)
+            writes = [(os.path.join(folder, name), c) for name, c in sorted(note["files"].items())]
             # 같은 자료가 전에 단일 파일로 저장돼 있었다면 지운다. 남겨 두면 같은 개념
             # 지도가 두 번 읽혀 그래프에 중복 간선이 생긴다(빌더는 materials/**를 다 본다).
-            stale = os.path.join(MATERIALS_DIR, f"{slug}.md")
+            stale = os.path.join(root, f"{slug}.md")
         else:
-            writes = [(os.path.join(MATERIALS_DIR, f"{slug}.md"), note["content"])]
+            writes = [(os.path.join(root, f"{slug}.md"), note["flat"])]
             stale = None
 
         if args.dry_run:
@@ -1840,16 +1885,25 @@ def main():
             os.remove(stale)
 
         path = writes[0][0]
-        lines = len(note["content"].splitlines())
-        if note["source"] is not None:
-            src_lines = len(note["source"].splitlines())
+        saved = " · ".join(f"`{p}` ({len(c.splitlines())}줄)" for p, c in writes)
+        if note["files"] and len(writes) > 1:
             report = [
-                f"✅ 자료 저장 — 증류 `{path}` ({lines}줄) · 원문 `{writes[1][0]}` ({src_lines}줄)",
+                f"✅ 자료 저장 — {saved}",
                 "",
                 "- 요약·개념 지도·빈칸 문제 은행이 증류본에 있다 — `## 개념 지도`는 그래프로 간다.",
-                "- 원문은 그대로 보존됐다 — 인용 근거이고, 러너가 `read_doc`으로 읽을 수 있다.",
+                "- 증류본의 `## 원문 목차`에서 절을 고르고 "
+                "`read_doc`의 `section`으로 그 절의 원문만 읽는다.",
+                "- 원문은 그대로 보존됐다 — 인용 근거이고, 러너가 읽을 수 있다.",
+            ]
+        elif note["files"] and not note["distilled"]:
+            report = [
+                f"✅ 원문 저장 — {saved}",
+                "",
+                "- ⚠️ **증류는 없다** — `## 개념 지도`가 없어 그래프에 들어가는 것은 없다.",
+                "- 원문은 그대로 보존됐다. 러너가 `read_doc`으로 절 단위로 읽을 수 있다.",
             ]
         elif note["distilled"]:
+            lines = len(writes[0][1].splitlines())
             report = [
                 f"✅ 자료 지도 저장 — `{path}` ({lines}줄)",
                 "",
@@ -1860,7 +1914,7 @@ def main():
             # 증류를 대신 해 주지 않는다(이 CI는 LLM 토큰 0이 원칙이다). 대신 무엇이 저장됐고
             # 무엇이 없는지 정확히 말한다 — 라벨과 보고가 어긋나면 저작권 판단까지 오도한다.
             report = [
-                f"✅ 자료 원문 저장 — `{path}` ({lines}줄)",
+                f"✅ 자료 원문 저장 — `{path}` ({len(writes[0][1].splitlines())}줄)",
                 "",
                 "- ⚠️ **증류는 없다** — `## 개념 지도`가 없어 `tags: [material, raw]`로 적었다.",
                 "  그래프에 들어가는 것은 없다(선수관계는 `## 개념 지도`에서만 읽는다).",

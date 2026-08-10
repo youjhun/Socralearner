@@ -57,6 +57,7 @@ import sys
 MASTERY = "mastery.md"
 DAILY_DIR = "daily"
 MATERIALS_DIR = "materials"
+PAPERS_DIR = "papers"
 DRILLS = "drills.md"
 OUT = "concepts.json"
 SECTION = "개념 지도"
@@ -101,7 +102,12 @@ WEAK_DUMP_MIN = 10
 
 # 선수관계를 읽을 곳. daily는 세션마다 한두 줄씩 쌓이고, materials는 강의자료에서
 # 증류한 개념 목록이라 한 번에 그래프의 뼈대가 들어온다. 둘 다 봐야 그래프가 채워진다.
-EDGE_DIRS = (DAILY_DIR, MATERIALS_DIR)
+#
+# 2026-08-10: `papers/`를 더했다. 논문도 자료와 같은 방식으로 원문을 보존하게 되면서
+# `papers/<slug>/distilled.md`에 `## 개념 지도`가 생기는데, 여기 없으면 그것이 **갈 곳이
+# 없다** — 자료를 올려 증류까지 됐는데 그래프에 아무것도 안 들어가는 조용한 실패가 된다.
+# 논문 세션 노트(`papers/<slug>/sessions/`)의 개념 지도도 같은 이유로 daily와 같게 다룬다.
+EDGE_DIRS = (DAILY_DIR, MATERIALS_DIR, PAPERS_DIR)
 
 # mastery.md 상태 → Topdown이 아는 어휘. `설명가능`만 '통과'로 친다.
 MASTERED = {"설명가능"}

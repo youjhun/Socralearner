@@ -403,6 +403,14 @@ class TestRegistryPlusNotes(unittest.TestCase):
         self.assertEqual(n_e, 0)
         self.assertEqual(edges.count(("푸리에 변환", "복소지수")), 1)
 
+    def test_a_papers_concept_map_reaches_the_graph(self):
+        """논문 폴더의 개념 지도도 그래프로 간다 — 아니면 증류가 갈 곳이 없다."""
+        self.write("papers/attention/distilled.md", "## 개념 지도\n### 딥러닝\n- 어텐션 ← 내적\n")
+        mastery, edges, domain_of, sources, ids = self.registry_side()
+        _n_c, n_e = bc.merge_note_ingredients(mastery, edges, domain_of, sources, ids)
+        self.assertEqual(n_e, 1)
+        self.assertIn(("어텐션", "내적"), edges)
+
     def test_no_notes_changes_nothing(self):
         mastery, edges, domain_of, sources, ids = self.registry_side()
         before = (dict(mastery), list(edges), dict(domain_of))
