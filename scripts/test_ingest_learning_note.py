@@ -499,16 +499,16 @@ updated: 2026-08-02
                     "## 빈칸 문제\n1. ___은 쿼리와 키의 내적이다."}
 
     drafted = ingest.build_material(APP_DRAFT, "2026-08-09")
-    check("증류 없는 원문은 raw로 적힌다", "tags: [material, raw]" in drafted["content"],
-          drafted["content"][:200])
-    check("증류 없는 원문에 distilled가 안 붙는다", "distilled]" not in drafted["content"])
-    check("source가 증류를 주장하지 않는다", "증류 없음" in drafted["content"])
+    check("증류 없는 원문은 raw로 적힌다", "tags: [material, raw]" in drafted["flat"],
+          drafted["flat"][:200])
+    check("증류 없는 원문에 distilled가 안 붙는다", "distilled]" not in drafted["flat"])
+    check("source가 증류를 주장하지 않는다", "증류 없음" in drafted["flat"])
     check("build_material이 판정을 돌려준다", drafted["distilled"] is False)
 
     real = ingest.build_material(REAL, "2026-08-09")
-    check("실제 증류본은 distilled로 적힌다", "tags: [material, distilled]" in real["content"],
-          real["content"][:200])
-    check("실제 증류본의 source는 증류를 말한다", "자료 증류 →" in real["content"])
+    check("실제 증류본은 distilled로 적힌다", "tags: [material, distilled]" in real["flat"],
+          real["flat"][:200])
+    check("실제 증류본의 source는 증류를 말한다", "자료 증류 →" in real["flat"])
     check("실제 증류본 판정", real["distilled"] is True)
 
     # 판정 기준 자체 — `## 개념 지도`가 파이프라인이 실제로 먹는 절이다.
@@ -529,18 +529,57 @@ updated: 2026-08-02
                              "## 개념 지도\n### 딥러닝\n- 어텐션 ← 내적\n\n"
                              "## 빈칸 문제\n1. ___\n\n## 원문\n\n### 1 Introduction\n\nRecurrent models…"}
     folded = ingest.build_material(APP_DISTILLED, "2026-08-09")
-    check("증류가 있으면 폴더형으로 나뉜다", folded["source"] is not None)
-    check("증류본은 distilled", "tags: [material, distilled]" in folded["content"])
-    check("원문은 source", "tags: [material, source]" in folded["source"])
+    dist, src_file = folded["files"]["distilled.md"], folded["files"]["source.md"]
+    check("증류가 있으면 폴더형으로 나뉜다", set(folded["files"]) == {"distilled.md", "source.md"})
+    check("증류본은 distilled", "tags: [material, distilled]" in dist)
+    check("원문은 source", "tags: [material, source]" in src_file)
     check("개념 지도는 증류본에만 있다",
-          "## 개념 지도" in folded["content"] and "## 개념 지도" not in folded["source"])
-    check("원문이 그대로 보존된다", "Recurrent models" in folded["source"])
+          "## 개념 지도" in dist and "## 개념 지도" not in src_file)
+    check("원문이 그대로 보존된다", "Recurrent models" in src_file)
     # 원문 쪽에 개념 지도가 없어야 빌더가 같은 간선을 두 번 읽지 않는다(materials/** 전부를 본다).
-    check("증류본에 원문이 섞이지 않는다", "Recurrent models" not in folded["content"])
+    check("증류본에 원문이 섞이지 않는다", "Recurrent models" not in dist)
+    check("자료는 materials/로 간다", folded["root"] == "materials")
 
     # 증류가 없으면 나눌 것이 하나뿐이라 빈 distilled.md를 만들지 않는다.
     only_raw = ingest.build_material(APP_DRAFT, "2026-08-09")
-    check("증류가 없으면 단일 파일", only_raw["source"] is None)
+    check("증류가 없으면 단일 파일", only_raw["files"] is None)
+
+    # ── 원문 목차 — 어느 절을 열지 고르는 지도 ─────────────────────────────────
+    print("\n[자료] 원문 목차")
+    check("원문의 ### 제목을 긁는다",
+          ingest.source_toc("### 1 Introduction\n글\n\n### 3.2.1 Scaled Dot\n글")
+          == ["1 Introduction", "3.2.1 Scaled Dot"])
+    check("제목이 없으면 빈 목록", ingest.source_toc("본문뿐이다") == [])
+    check("증류본에 원문 목차가 실린다", "## 원문 목차" in dist and "- 1 Introduction" in dist)
+    check("목차가 read_doc 쓰는 법을 알려준다", "`section`" in dist)
+    # ⚠️ `split_source`의 경계는 `^##\s*원문\s*$`로 줄 끝까지 고정이다. `## 원문 목차`가
+    #    경계로 오인되면 증류본이 원문 취급되어 파일이 잘못 갈린다.
+    check("`## 원문 목차`는 원문 경계로 오인되지 않는다",
+          ingest.split_source("## 원문 목차\n- A\n\n본문")[1] is None)
+    no_toc = ingest.build_material(
+        {"number": 11, "title": "[자료] 2026-08-09 x — X",
+         "body": "## 개념 지도\n- A ← B\n\n## 원문\n\n제목 없는 원문이다"}, "2026-08-09")
+    check("원문에 절이 없으면 목차 절을 안 만든다",
+          "## 원문 목차" not in no_toc["files"]["distilled.md"])
+
+    # ── 논문도 같은 방식 — `paper:` 지시행이 papers/<slug>/로 보낸다 ───────────
+    print("\n[논문] 원문 보존 (자료와 같은 기계)")
+    PAPER = {"number": 12, "title": "[자료] 2026-08-09 attention — Attention Is All You Need",
+             "body": "paper: attention-is-all-you-need\n\n## 개념 지도\n- 어텐션 ← 내적\n\n"
+                     "## 원문\n\n### 1 Introduction\n\nRecurrent models…"}
+    paper = ingest.build_material(PAPER, "2026-08-09")
+    check("논문은 papers/로 간다", paper["root"] == "papers")
+    check("논문 slug는 지시행이 정한다", paper["slug"] == "attention-is-all-you-need")
+    check("논문도 폴더형", set(paper["files"]) == {"distilled.md", "source.md"})
+    check("지시행이 본문에 남지 않는다", "paper:" not in paper["files"]["source.md"])
+
+    # 증류가 없어도 논문은 폴더다 — `papers/<slug>/`가 이미 폴더 규약이고, 빈 껍데기
+    # distilled.md를 만드는 대신 source.md 하나만 둔다.
+    paper_raw = ingest.build_material(
+        {"number": 13, "title": "[자료] 2026-08-09 p — P",
+         "body": "paper: p\n\n## 러너에게\n읽어라\n\n## 원문\n\n원문뿐"}, "2026-08-09")
+    check("증류 없는 논문도 폴더형", paper_raw["files"] is not None)
+    check("빈 distilled.md를 만들지 않는다", set(paper_raw["files"]) == {"source.md"})
 
     print("\n[자료] 같은 Issue를 다시 보내도 파일이 늘지 않는다")
     with tempfile.TemporaryDirectory() as tmp:
@@ -579,6 +618,62 @@ updated: 2026-08-02
                   and os.path.isfile("materials/attention/source.md"))
             check("옛 단일 파일이 지워졌다", not os.path.exists("materials/attention.md"),
                   str(os.listdir("materials")))
+        finally:
+            os.chdir(cwd)
+
+    # ── 자료 진도 — 논문의 READING_STATUS와 같은 기계 ────────────────────────
+    #
+    # 원문을 절 단위로 읽게 되면서 "오늘 어느 절부터인가"가 세션의 첫 물음이 됐다.
+    # 기록이 없으면 러너가 daily에서 짐작하고, 짐작이 틀리면 이미 한 절을 또 한다.
+    print("\n[학습] 자료 진도 갱신")
+    with tempfile.TemporaryDirectory() as tmp:
+        cwd = os.getcwd()
+        try:
+            os.chdir(tmp)
+            os.makedirs("daily")
+            with open("STATUS.md", "w", encoding="utf-8") as f:
+                f.write("---\n---\n## 지금 약한 것\n- x\n")
+            with open("payload.json", "w", encoding="utf-8") as f:
+                json.dump({
+                    "number": 20, "title": "[학습] 2026-08-10 attn — 어텐션",
+                    "body": "## 목표\n- 어텐션\n\n## 오늘 직접 학습한 지식\n1. 어텐션은 내적이다\n\n"
+                            "## 자료 진도 갱신\n### Progress\n- cs224n §3.2.1 까지\n"
+                            "### Next Session\n- cs224n §3.2.2\n",
+                }, f)
+            argv = sys.argv
+            sys.argv = ["ingest", "--payload", "payload.json", "--today", "2026-08-10"]
+            try:
+                ingest.main()
+            finally:
+                sys.argv = argv
+
+            status = open("materials/READING_STATUS.md", encoding="utf-8").read()
+            check("자료 진도가 파일로 남는다", "cs224n §3.2.1 까지" in status, status)
+            check("다음 세션 시작점도 남는다", "cs224n §3.2.2" in status)
+            note = open(f"daily/{os.listdir('daily')[0]}", encoding="utf-8").read()
+            check("진도 절은 세션 노트에 안 남는다(파일로 옮겨졌다)", "자료 진도 갱신" not in note)
+        finally:
+            os.chdir(cwd)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        cwd = os.getcwd()
+        try:
+            os.chdir(tmp)
+            os.makedirs("daily")
+            with open("STATUS.md", "w", encoding="utf-8") as f:
+                f.write("---\n---\n## 지금 약한 것\n- x\n")
+            with open("payload.json", "w", encoding="utf-8") as f:
+                json.dump({"number": 21, "title": "[학습] 2026-08-10 x — X",
+                           "body": "## 목표\n- x\n\n## 오늘 직접 학습한 지식\n1. 배운 것이 있다\n"}, f)
+            argv = sys.argv
+            sys.argv = ["ingest", "--payload", "payload.json", "--today", "2026-08-10"]
+            try:
+                ingest.main()
+            finally:
+                sys.argv = argv
+            # 절을 안 남긴 세션이 빈 진도 파일을 만들면 "진도가 없다"가 아니라 "0이다"로 읽힌다.
+            check("진도 절이 없으면 파일을 만들지 않는다",
+                  not os.path.exists("materials/READING_STATUS.md"))
         finally:
             os.chdir(cwd)
 
