@@ -641,6 +641,85 @@ updated: 2026-08-02
     #
     # 원문을 절 단위로 읽게 되면서 "오늘 어느 절부터인가"가 세션의 첫 물음이 됐다.
     # 기록이 없으면 러너가 daily에서 짐작하고, 짐작이 틀리면 이미 한 절을 또 한다.
+    # ── 학습 설계도 — 순서의 SSOT (2026-08-10) ────────────────────────────────
+    #
+    # 이 파일은 `git add` 범위에 없어서 **손으로만 갱신됐다.** 그래서 `[다음]`·`[완료]`
+    # 표시가 세션이 진행돼도 움직이지 않았다. 자료 진도와 같은 기계를 그대로 쓴다.
+    print("\n[학습] 학습 설계도")
+    with tempfile.TemporaryDirectory() as tmp:
+        cwd = os.getcwd()
+        try:
+            os.chdir(tmp)
+            os.makedirs("daily")
+            with open("STATUS.md", "w", encoding="utf-8") as f:
+                f.write("---\n---\n## 지금 약한 것\n- x\n")
+            with open("payload.json", "w", encoding="utf-8") as f:
+                json.dump({
+                    "number": 30, "title": "[학습] 2026-08-10 phase — 위상",
+                    "body": "## 목표\n- 위상\n\n## 오늘 직접 학습한 지식\n1. 위상은 같은 주파수의 cos/sin 비율이다\n\n"
+                            "## 학습 설계도\n### 학습 경로\n"
+                            "| 단계 | 주제 | 왜 이 순서 | 검증 기준 |\n|---|---|---|---|\n"
+                            "| 7 `[완료]` | 위상과 복소지수 | Fourier 뒤 | 진폭·위상 둘 다 필요한 이유 |\n",
+                }, f)
+            argv = sys.argv
+            sys.argv = ["ingest", "--payload", "payload.json", "--today", "2026-08-10"]
+            try:
+                ingest.main()
+            finally:
+                sys.argv = argv
+
+            # 파일이 없었으므로 견본이 먼저 생기고, 그 위에 절이 교체된다.
+            spec = open("learning-spec.md", encoding="utf-8").read()
+            check("설계도가 없으면 견본을 만든다", "kind: learning-spec" in spec, spec[:120])
+            check("mode: topdown 이 적힌다", "mode: topdown" in spec)
+            check("경로가 갱신된다", "위상과 복소지수" in spec, spec)
+            check("완료 표시가 들어간다", "`[완료]`" in spec)
+            note = open(f"daily/{os.listdir('daily')[0]}", encoding="utf-8").read()
+            check("설계도 절은 세션 노트에 안 남는다", "학습 설계도" not in note)
+        finally:
+            os.chdir(cwd)
+
+    # `[설정]`으로 처음 만드는 경로 — 새 사용자의 첫 파일이다.
+    with tempfile.TemporaryDirectory() as tmp:
+        cwd = os.getcwd()
+        try:
+            os.chdir(tmp)
+            with open("payload.json", "w", encoding="utf-8") as f:
+                json.dump({
+                    "number": 31, "title": "[설정] 학습 설계도",
+                    "body": "## 학습 설계도\n### 학습 목표\n- EEG 기반 조현병 분류를 스스로 설명한다\n"
+                            "### 없는 절이다\n- 이건 버려져야 한다\n",
+                }, f)
+            argv = sys.argv
+            sys.argv = ["ingest", "--payload", "payload.json", "--today", "2026-08-10",
+                        "--report", "report.md"]
+            try:
+                ingest.main()
+            finally:
+                sys.argv = argv
+
+            spec = open("learning-spec.md", encoding="utf-8").read()
+            check("[설정]으로 설계도가 생긴다", "EEG 기반 조현병 분류" in spec, spec[:200])
+            report = open("report.md", encoding="utf-8").read()
+            check("생성이라고 보고한다", "생성" in report, report)
+            # 없는 절에 보낸 패치는 조용히 버려진다 — 그것을 말해야 한다.
+            check("건너뛴 절을 말한다", "없는 절이다" in report and "건너뜀" in report, report)
+        finally:
+            os.chdir(cwd)
+
+    # ⚠️ 워크플로가 파일을 쓰고도 커밋하지 않는 조용한 실패 — 경계 주석과 `git add`가
+    #    함께 갱신돼야 한다. 하나만 고치면 설계도가 영원히 저장소에 안 올라간다.
+    print("\n[워크플로] 설계도가 커밋 범위에 있다")
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    wf = open(os.path.join(repo_root, ".github", "workflows", "learning-note-ingest.yml"),
+              encoding="utf-8").read()
+    add_line = [l for l in wf.splitlines() if "git add -A daily" in l]
+    check("git add 범위에 learning-spec.md", bool(add_line) and "learning-spec.md" in add_line[0],
+          add_line[0] if add_line else "(git add 줄을 못 찾음)")
+    boundary = [l for l in wf.splitlines() if l.startswith("# 경계:")]
+    check("경계 주석도 함께 갱신됐다", bool(boundary) and "learning-spec.md" in boundary[0],
+          boundary[0] if boundary else "(경계 주석을 못 찾음)")
+
     print("\n[학습] 자료 진도 갱신")
     with tempfile.TemporaryDirectory() as tmp:
         cwd = os.getcwd()

@@ -162,6 +162,18 @@ READING_STATUS_PATH = os.path.join(PAPERS_DIR, "READING_STATUS.md")
 MATERIAL_STATUS_SECTION = "자료 진도 갱신"
 MATERIAL_STATUS_PATH = os.path.join(MATERIALS_DIR, "READING_STATUS.md")
 
+# 학습 설계도 — **순서의 SSOT.** `mode: topdown`이 목표 한 줄에서 큰 그림→개념 분해→순서
+# →검증기준으로 경로를 만든다. 논문도 자료도 파킹랏도 없는 사람의 시작점이 이 파일이다.
+#
+# 우선순위는 `PARKING-LOT.md`가 이미 정해 두었다 — *"학습 설계도의 순서는 근거를 가진
+# 가설이고, 큐는 그것을 보조한다."* 설계도=주 · 파킹랏=보조 · `courses/`=재료.
+#
+# 왜 여기 오는가(2026-08-10): 이 파일이 `git add` 범위에 없어서 **손으로만 갱신됐다.**
+# 그래서 `[다음]`·`[완료]` 표시가 세션이 진행돼도 움직이지 않았다. 자료 진도(위)와 같은
+# 기계를 그대로 쓴다 — 절을 하나 남기면 CI가 파일에 옮겨 적는다.
+LEARNING_SPEC_SECTION = "학습 설계도"
+LEARNING_SPEC_PATH = "learning-spec.md"
+
 # ─────────────────────────── 설정 (`[설정]`) ───────────────────────────
 #
 # 2026-08-04: `topics.yaml`을 사람이 손으로 쓰게 하는 것이 병목이었다. YAML 문법이
@@ -605,6 +617,8 @@ def build_note(payload, today):
 
     body, status_patch = extract_status_patch(body)
     body, material_patch = extract_status_patch(body, MATERIAL_STATUS_SECTION)
+    # 세션이 한 단계를 통과했으면 `[다음]` → `[완료]`가 여기로 온다.
+    body, spec_patch = extract_status_patch(body, LEARNING_SPEC_SECTION)
     body, mastery = pop_section(body, MASTERY_SECTION)
     body, drills = pop_section(body, DRILLS_SECTION)
     body, missing = ensure_headings(body)
@@ -659,6 +673,7 @@ def build_note(payload, today):
         "content": "\n".join(fm) + "\n\n" + body.rstrip() + "\n",
         "status_patch": status_patch,
         "material_patch": material_patch,
+        "spec_patch": spec_patch,
         "mastery": mastery,
         "drills": drills,
         "track": user_fm.get("track", ""),
@@ -1277,6 +1292,67 @@ kind: reading-status
 - (다음 세션에 열 자료와 절 한 줄)
 """
 
+# 절 이름은 실제 설계도(`mode: topdown`)의 것과 같아야 한다 — `apply_section_patch`가
+# 이 제목들을 찾아 본문을 통째로 교체하기 때문이다. 없는 절에 보낸 패치는 조용히 버려진다.
+LEARNING_SPEC_TEMPLATE = """---
+title: "학습 설계도"
+updated: {today}
+kind: learning-spec
+mode: topdown
+---
+
+# 학습 설계도
+
+> **순서의 SSOT.** 실라버스가 없어도 **목표 한 줄**에서 큰 그림 → 개념 분해 → 순서 →
+> 검증 기준으로 경로를 만든다. 논문·자료·Parking Lot이 아직 없어도 여기서 시작한다.
+>
+> **철칙**: 아래 경로는 확정이 아니라 **검증 대상 가설**이다 — 배우면서 교정한다.
+> 세션이 끝나면 Issue의 `## 학습 설계도` 절로 갱신된다(손으로 고치지 않는다).
+>
+> Parking Lot은 이 순서를 **보조**한다 — 논문을 읽다 막힌 개념을 여기 순서에 끼워 넣는다.
+
+## 학습 목표 — 무엇을 할 줄 알게 되는가
+
+- (이 학습이 끝나면 나는 ___를 스스로 설명/수행할 수 있다)
+
+## 큰 그림 (why & 전체 지형)
+
+- (아직 없음 — 목표 한 줄을 러너에게 주면 여기서부터 만든다)
+
+## 학습 경로 (단계·마일스톤)
+
+> `[완료]`는 실측 기록으로 확인된 단계, `[다음]`은 생성된 가설 경로.
+> **왜 이 순서인지**(선수 개념)를 각 행에 남긴다.
+
+| 단계 | 주제 | 왜 이 순서 (선수 개념) | 검증 기준 (무엇을 설명할 수 있으면 통과) |
+|---|---|---|---|
+| 1 `[다음]` | (첫 단계) | (진입점) | (무엇을 설명하면 통과인가) |
+
+## 검증 / 도전
+
+- (각 단계를 통과했다고 볼 근거 — 반박을 견딘 설명)
+
+## 생성 근거 & 반증
+
+- (이 경로를 왜 이렇게 짰나. 배우면서 틀린 것이 나오면 여기 적고 위 표를 고친다)
+"""
+
+
+def ensure_learning_spec(today):
+    return ensure_status_file(LEARNING_SPEC_PATH, LEARNING_SPEC_TEMPLATE, today)
+
+
+def apply_learning_spec(patch, today):
+    """`## 학습 설계도` 절 → `learning-spec.md`. 없으면 견본을 먼저 만든다.
+
+    자료 진도(`MATERIAL_STATUS_PATH`)와 **같은 기계**다 — `apply_section_patch`가 이미
+    경로를 받으므로 새 코드가 아니라 호출 하나다.
+    """
+    if not patch:
+        return []
+    ensure_learning_spec(today)
+    return apply_section_patch(patch, today, path=LEARNING_SPEC_PATH)
+
 
 def build_topics(payload):
     """`[설정]` Issue의 `## 주제` 절 → [{id, label, query, seed, …}].
@@ -1786,6 +1862,40 @@ def main():
 
     # `[설정]` — 학습 기록이 아니라 설정 파일(topics.yaml)의 쓰기 경로다.
     if (payload.get("title") or "").startswith("[설정]"):
+        # 학습 설계도 — **새 사용자의 첫 파일.** 목표 한 줄에서 러너가 경로를 만들어
+        # 승인받은 뒤 이 절로 보낸다. 세션 기록이 아니므로 `[설정]`이 맞는 자리다.
+        _, spec_patch = extract_status_patch(assemble(payload), LEARNING_SPEC_SECTION)
+        if spec_patch:
+            if args.dry_run:
+                print(f"[dry-run] {LEARNING_SPEC_PATH}\n")
+                print(json.dumps(spec_patch, ensure_ascii=False, indent=2))
+                return
+            created = not os.path.exists(LEARNING_SPEC_PATH)
+            spec_applied = apply_learning_spec(spec_patch, args.today)
+            report = [
+                f"✅ 학습 설계도 {'생성' if created else '갱신'} — `{LEARNING_SPEC_PATH}`",
+                "",
+            ]
+            if spec_applied:
+                report.append(f"- 갱신된 절: {', '.join(spec_applied)}")
+            skipped = [k for k in spec_patch if k not in spec_applied]
+            if skipped:
+                # 없는 절에 보낸 패치는 조용히 버려진다 — 그것을 말한다.
+                report.append(
+                    f"- ⚠️ 설계도에 없는 절이라 건너뜀: {', '.join(skipped)} "
+                    "(견본의 절 이름을 그대로 쓴다)"
+                )
+            report += [
+                "",
+                "> 이 순서가 앞으로 모든 과목 세션의 시작점이다. Parking Lot은 이 순서를 **보조**한다.",
+            ]
+            text = "\n".join(report)
+            print(text)
+            if args.report:
+                with open(args.report, "w", encoding="utf-8") as f:
+                    f.write(text + "\n")
+            return
+
         # 트랙(학습 서랍)과 주제(논문 수집)는 같은 `[설정]` Issue로 온다 — 둘 다 설정이고,
         # 사용자에게 "이건 어느 Issue로 쓰지"를 고르게 하지 않는다.
         tracks = build_tracks(payload)
@@ -2021,6 +2131,7 @@ def main():
         material_applied = apply_section_patch(
             note["material_patch"], args.today, path=MATERIAL_STATUS_PATH
         )
+    spec_applied = apply_learning_spec(note["spec_patch"], args.today)
     if append_trajectory(note["display"], note["date"], path, args.today):
         applied.append(TRAJECTORY_SECTION)
     promoted = write_mastery_fragment(note["mastery"], note["track"], note["date"], note["slug"], path)
@@ -2041,6 +2152,10 @@ def main():
     if material_applied:
         report.append(
             f"- 자료 진도 갱신: `{MATERIAL_STATUS_PATH}` — {', '.join(material_applied)}"
+        )
+    if spec_applied:
+        report.append(
+            f"- 학습 설계도 갱신: `{LEARNING_SPEC_PATH}` — {', '.join(spec_applied)}"
         )
     if promoted:
         report.append(f"- 이해도 승급 조각: `{promoted}`" if promoted.endswith(".md") else f"- {promoted}")
