@@ -1243,6 +1243,7 @@ def write_paper_session(note, payload, today):
     # `papers/`는 sync_from_template의 NEVER 경로다 — 템플릿을 갱신해도 기존 학습자의
     # repo에는 이 파일이 오지 않는다. 그래서 첫 논문 세션에서 여기서 만든다.
     ensure_reading_status(today)
+    ensure_position_section()
     applied = apply_section_patch(note["reading_patch"], today, path=READING_STATUS_PATH)
     return touched, applied, {"parked": parked, "artifacts": artifacts}
 
@@ -1269,6 +1270,10 @@ kind: reading-status
 ## Next Session
 
 - (다음 세션의 시작점 한 줄)
+
+## Position
+
+- (아직 없음)
 """
 
 MATERIAL_STATUS_TEMPLATE = """---
@@ -1800,6 +1805,25 @@ def ensure_status_file(path, template, today):
 
 def ensure_reading_status(today):
     return ensure_status_file(READING_STATUS_PATH, READING_STATUS_TEMPLATE, today)
+
+
+def ensure_position_section(path=READING_STATUS_PATH):
+    """기존 `READING_STATUS.md`에 `## Position` 절이 없으면 끝에 덧붙인다.
+
+    `ensure_status_file`은 파일이 있으면 손대지 않는다(학습자의 기록이라 의도된 것) —
+    그래서 템플릿에 절을 새로 넣어도 이미 세션을 한 번이라도 돌린 학습자의 파일에는
+    오지 않는다. 이 함수는 그 계약을 건드리지 않고 **새로 추가된 절 하나**만 뒤늦게
+    채워 넣는 좁은 통로다. 이미 있으면 아무 일도 하지 않는다(멱등).
+    """
+    if not os.path.exists(path):
+        return False
+    with open(path, encoding="utf-8") as f:
+        content = f.read()
+    if "## Position" in content:
+        return False
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(content.rstrip("\n") + "\n\n## Position\n\n- (아직 없음)\n")
+    return True
 
 
 def ensure_material_status(today):
