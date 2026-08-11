@@ -160,10 +160,17 @@ Parking Lot 항목은 나중에 **별도 학습 세션의 재료**가 된다(`[�
 | `## 주석` | `papers/<slug>/annotations.md` | 세션마다 쌓임 |
 | `## Parking Lot` | `papers/<slug>/parking-lot.md` | 항목 단위 병합(중복 제거, `- [x]`는 해소) |
 | `## 아티팩트` → `### <제목>` | `papers/<slug>/artifacts/` | 제목마다 파일 하나 |
-| `## READING_STATUS 갱신` → `### Progress` / `### Current Understanding` / `### Next Session` | `papers/READING_STATUS.md` | 같은 절 교체 |
+| `## READING_STATUS 갱신` → `### Progress` / `### Current Understanding` / `### Next Session` / `### Position` | `papers/READING_STATUS.md` | 같은 절 교체 |
 
 `## 메타`에 쓰는 키(모르면 그 줄을 빼라 — 지어내지 마라):
 `title` · `authors` · `year` · `venue` · `link` · `understanding`(위 5의 4단계) · `next_section`
+
+`### Position`에는 이번 세션에서 **사용자가 실제로 통과한 마지막 문장**을 원문에서 그대로
+옮겨 적어라(요약도 의역도 아니다 — 화면이 이 문장을 원문에서 다시 찾아 표시를 그린다).
+형식은 `- <slug>: "인용문"` 한 줄이다. 여러 자료를 다뤘으면 `### Progress`와 같은 방식으로
+다른 자료의 최근 인용도 함께 옮겨 적어라 — 이 절도 세션마다 **통째로 교체**되므로 오늘 안
+다룬 자료를 빠뜨리면 그 자료의 표시가 사라진다. 같은 문장이 원문에 두 번 이상 나오면 화면이
+자리를 못 정하니, 너무 짧거나 흔한 문장 대신 **그 자리를 가리키는 온전한 한 문장**을 골라라.
 
 ### 세션 원문에 반드시 남기는 것
 

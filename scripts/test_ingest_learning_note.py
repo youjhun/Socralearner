@@ -262,6 +262,39 @@ def main():
         meta = open(meta_path, encoding="utf-8").read()
         check("meta.yaml은 키 단위로 병합된다", "title: T" in meta and "비판적 이해" in meta, meta)
 
+        # ⑦ Position 절 — 이미 세션을 한 번 돌린(=템플릿 갱신 전에 만들어진) 파일에도
+        #    뒤늦게 절이 생겨야 다음 세션의 패치가 조용히 버려지지 않는다.
+        reading_path = os.path.join(tmp, "READING_STATUS.md")
+        with open(reading_path, "w", encoding="utf-8") as f:
+            f.write(
+                "---\ntitle: x\nupdated: 2026-08-01\n---\n\n"
+                "## Progress\n\n- (아직 없음)\n\n"
+                "## Current Understanding\n\n- (아직 없음)\n\n"
+                "## Next Session\n\n- (다음 세션의 시작점 한 줄)\n"
+            )
+        migrated = ingest.ensure_position_section(reading_path)
+        check("Position 절이 없는 기존 파일에 붙는다", migrated,
+              open(reading_path, encoding="utf-8").read())
+        check("Progress 절은 그대로 남는다",
+              "## Progress" in open(reading_path, encoding="utf-8").read())
+
+        again = ingest.ensure_position_section(reading_path)
+        check("이미 있으면 다시 손대지 않는다(멱등)", again is False)
+        check("절이 중복되지 않는다",
+              open(reading_path, encoding="utf-8").read().count("## Position") == 1)
+
+        ingest.apply_section_patch(
+            {"Position": '- cs224n-lec08: "attention은 모든 위치를 동시에 고려한다"'},
+            "2026-08-08", path=reading_path)
+        out = open(reading_path, encoding="utf-8").read()
+        check("마이그레이션 뒤에는 Position 패치가 실제로 적용된다",
+              "attention은 모든 위치를 동시에 고려한다" in out, out)
+
+        fresh_path = os.path.join(tmp, "READING_STATUS_fresh.md")
+        ingest.ensure_status_file(fresh_path, ingest.READING_STATUS_TEMPLATE, "2026-08-08")
+        check("새로 만든 파일은 처음부터 Position 절을 가진다",
+              "## Position" in open(fresh_path, encoding="utf-8").read())
+
         art_dir = os.path.join(tmp, "artifacts")
         os.makedirs(art_dir)
         written = ingest.write_artifacts(
