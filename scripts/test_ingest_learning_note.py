@@ -295,6 +295,80 @@ def main():
         check("새로 만든 파일은 처음부터 Position 절을 가진다",
               "## Position" in open(fresh_path, encoding="utf-8").read())
 
+        # ⑧ 자료 삭제 — 이 저장소에서 **파일을 지우는 유일한 경로**다. 앱도 자기 쪽에서
+        #    막지만 Issue는 사람이 손으로도 만들 수 있으므로 여기가 마지막 관문이다.
+        print("\n자료 삭제 — 모양 가드")
+        good, bad = ingest.parse_delete_targets(
+            "- papers/attn-demo\n- materials/피어싱-논문\n- `papers/quoted`\n"
+        )
+        check("정상 경로를 읽는다", good == [
+            ("papers", "attn-demo"), ("materials", "피어싱-논문"), ("papers", "quoted"),
+        ], str(good))
+        check("정상만 있으면 버린 것이 없다", bad == [], str(bad))
+
+        # 이 목록이 통과하면 CI가 repo 루트에서 그것을 지운다.
+        danger = (
+            "- papers/..\n"
+            "- papers/../../etc\n"
+            "- ../papers/x\n"
+            "- daily/2026-08-01\n"
+            "- .github/workflows\n"
+            "- papers/a/b\n"
+            "- papers/\n"
+            "- /etc/passwd\n"
+            "- papers/a b\n"
+        )
+        d_ok, d_bad = ingest.parse_delete_targets(danger)
+        check("경로 탈출·다른 뿌리를 전부 막는다", d_ok == [], str(d_ok))
+        check("막은 것을 보고한다(조용히 버리지 않는다)", len(d_bad) == 9, str(d_bad))
+
+        check("안내용 인용줄은 대상이 아니다",
+              ingest.parse_delete_targets("> papers/x 를 지운다\n")[0] == [])
+
+        # 실제로 지운다 — 폴더 통째로 + 옛 단일 파일 + 진도 파일의 그 slug 줄.
+        del_dir = os.path.join(tmp, "delete-case")
+        os.makedirs(os.path.join(del_dir, "papers", "gone", "sessions"))
+        os.makedirs(os.path.join(del_dir, "papers", "keep"))
+        os.makedirs(os.path.join(del_dir, "materials"))
+        for p, body in [
+            (["papers", "gone", "source.md"], "원문"),
+            (["papers", "gone", "paper.md"], "정제본"),
+            (["papers", "gone", "sessions", "2026-08-01-methods.md"], "세션"),
+            (["papers", "keep", "source.md"], "남아야 한다"),
+            (["materials", "old-single.md"], "옛 단일 파일"),
+        ]:
+            with open(os.path.join(del_dir, *p), "w", encoding="utf-8") as f:
+                f.write(body)
+        with open(os.path.join(del_dir, "papers", "READING_STATUS.md"), "w", encoding="utf-8") as f:
+            f.write(
+                "# 논문 읽기 상태\n\n## Progress\n\n- gone: 3장까지 읽음\n- keep: 1장\n\n"
+                "## Position\n\n- gone: \"인용문\"\n"
+            )
+
+        cwd = os.getcwd()
+        try:
+            os.chdir(del_dir)
+            removed, missing, touched = ingest.delete_materials(
+                [("papers", "gone"), ("materials", "old-single"), ("papers", "없는것")]
+            )
+        finally:
+            os.chdir(cwd)
+
+        check("폴더가 통째로 사라진다", not os.path.exists(os.path.join(del_dir, "papers", "gone")))
+        check("옛 단일 파일도 지운다",
+              not os.path.exists(os.path.join(del_dir, "materials", "old-single.md")))
+        check("다른 자료는 멀쩡하다",
+              os.path.exists(os.path.join(del_dir, "papers", "keep", "source.md")))
+        check("지운 것을 보고한다", sorted(removed) == ["materials/old-single", "papers/gone"], str(removed))
+        check("이미 없던 것을 구별한다", missing == ["papers/없는것"], str(missing))
+
+        status_after = open(os.path.join(del_dir, "papers", "READING_STATUS.md"), encoding="utf-8").read()
+        check("진도 파일에서 그 slug 줄이 빠진다", "gone:" not in status_after, status_after)
+        check("다른 자료의 진도는 남는다", "- keep: 1장" in status_after, status_after)
+        check("절 구조는 그대로다",
+              "## Progress" in status_after and "## Position" in status_after, status_after)
+        check("진도 파일을 고쳤다고 보고한다", len(touched) == 1, str(touched))
+
         art_dir = os.path.join(tmp, "artifacts")
         os.makedirs(art_dir)
         written = ingest.write_artifacts(
