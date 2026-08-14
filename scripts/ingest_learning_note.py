@@ -27,6 +27,7 @@ import datetime
 import json
 import os
 import re
+import shutil
 import sys
 
 DAILY_DIR = "daily"
@@ -1803,6 +1804,87 @@ def ensure_status_file(path, template, today):
     return True
 
 
+DELETE_SECTION = "삭제"
+
+# 지울 수 있는 뿌리는 둘뿐이다. 다른 것을 여기 넣으면 이 스크립트가 repo 루트에서
+# 도는 것을 잊은 셈이 된다 — `daily/`나 `.github/`가 이 목록에 들어오면 안 된다.
+DELETABLE_ROOTS = (MATERIALS_DIR, PAPERS_DIR)
+
+# 앱의 `SLUG_RE`(`lib/knowledge/materialPaths.ts`)와 **같은 모양**이어야 한다.
+# `.`이 없으므로 `..`이 만들어질 수 없고, `/`가 없으므로 경로를 벗어날 수 없다.
+DELETE_SLUG_RE = re.compile(r"^[\w가-힣-]{1,64}$")
+
+
+def parse_delete_targets(body):
+    """`## 삭제` 절의 `- <root>/<slug>` 줄을 (root, slug) 목록으로.
+
+    **모양이 아닌 줄은 조용히 버리지 않고 돌려준다** — 왜 안 지워졌는지 보고해야 한다.
+    이 값이 `shutil.rmtree`의 경로가 되므로 여기가 마지막 관문이다(앱도 자기 쪽에서 막지만
+    Issue는 사람이 손으로도 만들 수 있다).
+    """
+    ok, bad = [], []
+    for raw in (body or "").splitlines():
+        line = re.sub(r"^\s*(?:\d+[.)]|[-*])\s*", "", raw).strip().strip("`")
+        if not line or line.startswith(">"):
+            continue
+        parts = line.split("/")
+        if len(parts) != 2:
+            bad.append(line)
+            continue
+        root, slug = parts[0].strip(), parts[1].strip()
+        if root not in DELETABLE_ROOTS or not DELETE_SLUG_RE.match(slug):
+            bad.append(line)
+            continue
+        if (root, slug) not in ok:
+            ok.append((root, slug))
+    return ok, bad
+
+
+def strip_slug_from_status(path, slug):
+    """진도 파일에서 그 자료를 말하는 불릿 줄을 뺀다.
+
+    폴더만 지우면 `READING_STATUS.md`에 없는 자료의 진도가 남는다. 화면은 자료가 없으니
+    그리지 않지만, **러너는 그 파일을 매 세션 읽는다** — 지운 논문을 계속 "다음에 읽을 것"으로
+    본다. 절 구조(`## Progress` 등)는 건드리지 않고 줄만 뺀다.
+    """
+    if not os.path.exists(path):
+        return False
+    with open(path, encoding="utf-8") as f:
+        lines = f.read().splitlines()
+
+    keep = [l for l in lines if not (l.lstrip().startswith(("-", "*", "1.")) and slug in l)]
+    if len(keep) == len(lines):
+        return False
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("\n".join(keep).rstrip() + "\n")
+    return True
+
+
+def delete_materials(targets):
+    """자료 폴더를 통째로 지우고 진도 파일에서도 그 slug를 뺀다.
+
+    폴더형이 아닌 옛 단일 파일(`<root>/<slug>.md`)도 함께 지운다 — `build_material`이
+    승격할 때 지우던 그 파일이고, 남겨 두면 목록에 그대로 뜬다.
+    """
+    removed, missing, touched = [], [], []
+    for root, slug in targets:
+        folder = os.path.join(root, slug)
+        single = os.path.join(root, f"{slug}.md")
+        hit = False
+        if os.path.isdir(folder):
+            shutil.rmtree(folder)
+            hit = True
+        if os.path.exists(single):
+            os.remove(single)
+            hit = True
+        (removed if hit else missing).append(f"{root}/{slug}")
+
+        for status in (READING_STATUS_PATH, MATERIAL_STATUS_PATH):
+            if strip_slug_from_status(status, slug) and status not in touched:
+                touched.append(status)
+    return removed, missing, touched
+
+
 def ensure_reading_status(today):
     return ensure_status_file(READING_STATUS_PATH, READING_STATUS_TEMPLATE, today)
 
@@ -1886,6 +1968,53 @@ def main():
 
     # `[설정]` — 학습 기록이 아니라 설정 파일(topics.yaml)의 쓰기 경로다.
     if (payload.get("title") or "").startswith("[설정]"):
+        """
+        자료 삭제 — 앱의 「삭제」가 만든 Issue. **가장 먼저 본다**: 되돌리기 어려운 동작이므로
+        다른 절 파싱에 섞여 들어가지 않게 한다.
+
+        새 제목 prefix를 만들지 않은 이유: 워크플로의 `if:` 게이트와 아래 `PREFIXES` 배열이
+        같은 목록을 두 벌 들고 있고(이 파일이 스스로 경고한다 — *"한쪽만 열면 잡이 돌다가
+        실패한다"*), `[설정]`에 절을 더하면 그 두 곳을 안 건드린다.
+
+        워크플로도 안 고쳤다 — 커밋 스텝의 `git add -A … materials papers …`가 **삭제도 그대로
+        스테이징한다**(`os.remove(stale)`가 이미 이 경로로 동작 중인 증거).
+        """
+        _, delete_body = pop_section(assemble(payload), DELETE_SECTION)
+        if delete_body:
+            targets, bad = parse_delete_targets(delete_body)
+            if args.dry_run:
+                print(f"[dry-run] 삭제 대상 {len(targets)}건: {targets}")
+                if bad:
+                    print(f"[dry-run] 모양이 아니라 건너뜀: {bad}")
+                return
+            removed, missing, touched = delete_materials(targets)
+            report = [f"✅ 자료 {len(removed)}건 삭제", ""]
+            if removed:
+                report.append("- 지움: " + ", ".join(f"`{p}`" for p in removed))
+            if touched:
+                report.append("- 진도 파일에서도 뺐다: " + ", ".join(f"`{t}`" for t in touched))
+            if missing:
+                # 이미 없는 것을 지우라고 한 경우 — 실패가 아니지만 말해 준다(두 번 눌렀거나
+                # 앞선 삭제가 이미 처리했다).
+                report.append("- ℹ️ 이미 없었다: " + ", ".join(f"`{p}`" for p in missing))
+            if bad:
+                report.append(
+                    "- ⚠️ 모양이 아니라 **지우지 않았다**: "
+                    + ", ".join(f"`{b}`" for b in bad)
+                    + " (`materials/<slug>` 또는 `papers/<slug>` 꼴이어야 한다)"
+                )
+            report += [
+                "",
+                "> `concepts.json`은 다음 CI 실행에서 자동으로 다시 만들어진다 —"
+                " 지운 자료의 개념 간선은 그때 빠진다.",
+            ]
+            text = "\n".join(report)
+            print(text)
+            if args.report:
+                with open(args.report, "w", encoding="utf-8") as f:
+                    f.write(text + "\n")
+            return
+
         # 학습 설계도 — **새 사용자의 첫 파일.** 목표 한 줄에서 러너가 경로를 만들어
         # 승인받은 뒤 이 절로 보낸다. 세션 기록이 아니므로 `[설정]`이 맞는 자리다.
         _, spec_patch = extract_status_patch(assemble(payload), LEARNING_SPEC_SECTION)
