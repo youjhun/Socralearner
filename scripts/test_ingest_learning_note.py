@@ -238,6 +238,78 @@ def main():
         "Parking Lot" not in rich["body"] and "## 아티팩트" not in rich["body"],
     )
 
+    # ⑥-b `root:` 지시행 — 앱의 읽기 화면이 파킹랏·주석을 저장소로 올리게 되면서 열었다
+    #     (2026-08-14, 유지훈: *"파킹랏이나 주석이 … 항상 gpt가 읽을 수 있는 온라인으로"*).
+    #     렉처노트·교재는 `materials/`에 사는데 파킹랏을 받는 곳이 `papers/`밖에 없어서,
+    #     자료에 남긴 표시는 러너가 볼 수 없었다.
+    print("\n[논문] root: 지시행")
+    MARKS_BODY = """root: materials
+slug: ee202-lec08
+
+앱 읽기 화면에서 남긴 표시 2건 — 파킹랏 1 · 주석 1.
+
+## Parking Lot
+- phasor domain — 3쪽 · 왜 j가 붙나
+
+## 주석
+> "impedance is the ratio of phasors"
+— 저항과 무엇이 다른가 (4쪽)
+"""
+    marks = ingest.build_paper_session(
+        {"number": 51, "title": "[논문] ee202-lec08 — 읽기 표시 2026-08-14",
+         "body": MARKS_BODY, "comments": []},
+        "2026-08-14",
+    )
+    check("root: materials가 잡힌다", marks["root"] == "materials", marks["root"])
+    check("root 지시행은 세션 원문에서 빠진다", "root:" not in marks["body"], marks["body"][:80])
+    check("slug 지시행이 제목보다 이긴다", marks["slug"] == "ee202-lec08", marks["slug"])
+    check("파킹랏 항목이 잡힌다", "phasor domain" in marks["parking"])
+    check("주석이 annotations.md로 간다", "annotations.md" in marks["section_patches"])
+
+    check("root:가 없으면 papers가 기본이다", paper["root"] == "papers", paper["root"])
+
+    # 모르는 뿌리는 **기본값으로 떨어뜨린다.** 거부하면 러너가 오타 하나로 세션 기록을
+    # 잃는다. 그리고 이 값이 `os.path.join`의 첫 칸이 되므로 경로 탈출은 절대 통과하면 안 된다.
+    for bad in ("../../etc", "daily", ".github", "/papers", "papers/../..", ""):
+        got = ingest.parse_root(bad)
+        check(f"모르는 뿌리는 papers로 떨어진다 ({bad!r})", got == "papers", got)
+    check("papers는 그대로", ingest.parse_root("papers") == "papers")
+    check("materials는 그대로", ingest.parse_root("materials") == "materials")
+    check("앞뒤 공백·슬래시를 다듬는다", ingest.parse_root("  materials/  ") == "materials")
+
+    # 실제로 `materials/<slug>/`에 쓰는지 — 경로가 갈리는 지점이라 파일로 확인한다.
+    import tempfile as _tf
+    _cwd = os.getcwd()
+    with _tf.TemporaryDirectory() as tmp2:
+        os.chdir(tmp2)
+        try:
+            touched, _applied, extra = ingest.write_paper_session(
+                marks, {"number": 51}, "2026-08-14")
+            parking_path = os.path.join("materials", "ee202-lec08", "parking-lot.md")
+            check("세션이 materials/ 아래로 간다",
+                  touched[0].startswith(os.path.join("materials", "ee202-lec08")), touched[0])
+            check("파킹랏이 materials/<slug>/parking-lot.md에 생긴다",
+                  os.path.exists(parking_path), str(touched))
+            check("papers/ 아래에는 아무것도 안 생긴다",
+                  not os.path.exists(os.path.join("papers", "ee202-lec08")))
+            text = open(parking_path, encoding="utf-8").read()
+            check("파킹랏 항목이 담긴다", "phasor domain" in text, text)
+            check("새 항목으로 센다", extra["parked"][0] == 1, str(extra["parked"]))
+            annot = open(os.path.join("materials", "ee202-lec08", "annotations.md"),
+                         encoding="utf-8").read()
+            check("주석이 Issue 번호 블록으로 감싸인다", "<!-- issue:51 -->" in annot, annot[:120])
+
+            # 같은 Issue를 다시 돌려도 중복이 안 쌓인다(코멘트마다 CI가 다시 돈다).
+            ingest.write_paper_session(marks, {"number": 51}, "2026-08-14")
+            again = open(os.path.join("materials", "ee202-lec08", "annotations.md"),
+                         encoding="utf-8").read()
+            check("재실행에도 주석이 한 벌이다",
+                  again.count("impedance is the ratio of phasors") == 1, again)
+            twice = open(parking_path, encoding="utf-8").read()
+            check("재실행에도 파킹랏이 한 벌이다", twice.count("phasor domain") == 1, twice)
+        finally:
+            os.chdir(_cwd)
+
     import tempfile
     with tempfile.TemporaryDirectory() as tmp:
         path = os.path.join(tmp, "parking-lot.md")

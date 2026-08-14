@@ -142,6 +142,12 @@ DRILLS_HEADER = [
 # 2026-08-04(2): Parking Lot·아티팩트·meta는 `runner/paper-mode.md`의 루프가 실제로
 # 만들어 내는 산출물인데 받는 곳이 없어 세션 원문에만 묻혀 있었다. 묻히면 다음 세션의
 # 러너가 못 찾고, 못 찾으면 같은 선수지식을 매번 다시 미룬다.
+#
+# 2026-08-14: `root: materials` 지시행을 주면 위 경로가 통째로 `materials/<slug>/`로 간다
+# (`parse_root`). 앱 읽기 화면이 렉처노트·교재에 남긴 파킹랏·주석을 올리기 시작해서다 —
+# 그전에는 파킹랏을 받는 곳이 `papers/`뿐이라 자료에 남긴 표시를 러너가 볼 수 없었다.
+# `READING_STATUS 갱신`만은 예외로 `papers/READING_STATUS.md`에 남는다(자료 진도는
+# `## 자료 진도 갱신`이라는 다른 기계가 담당한다).
 PAPER_SECTIONS = {
     "정제본 갱신": "paper.md",
     "주석": "annotations.md",
@@ -945,7 +951,7 @@ def build_paper_session(payload, today):
 
     directives = {}
     lines = body.splitlines()
-    while lines and re.match(r"^(slug|runner|tags)\s*:\s*\S", lines[0].strip()):
+    while lines and re.match(r"^(slug|root|runner|tags)\s*:\s*\S", lines[0].strip()):
         key, value = lines[0].split(":", 1)
         directives[key.strip()] = value.strip()
         lines.pop(0)
@@ -978,6 +984,7 @@ def build_paper_session(payload, today):
 
     return {
         "slug": slug,
+        "root": parse_root(user_fm.get("root")),
         "section": section_name,
         "body": body,
         "reading_patch": reading_patch,
@@ -987,6 +994,30 @@ def build_paper_session(payload, today):
         "meta": parse_meta(meta),
         "runner": user_fm.get("runner", "paper-gpt"),
     }
+
+
+# `[논문]` 세션이 앉을 수 있는 뿌리. **이 둘뿐이다.**
+#
+# 2026-08-14: 앱의 읽기 화면이 파킹랏·주석을 저장소로 올리게 되면서 열었다(유지훈:
+# *"파킹랏이나 주석이 … 항상 gpt가 읽을 수 있는 온라인으로 올려야한다"*). 렉처노트·교재는
+# `materials/`에 사는데 파킹랏을 받는 곳이 `papers/`밖에 없어서, 자료에 남긴 표시는
+# 러너가 볼 수 없었다.
+#
+# 화이트리스트로 잠근 이유: 이 값이 `os.path.join`의 첫 칸이 되고 이 스크립트는 repo
+# 루트에서 돈다. 자유 문자열이면 `..`이나 `.github`가 들어올 수 있다 — `## 삭제`의
+# `DELETABLE_ROOTS`와 같은 판단이다.
+PAPER_ROOTS = (PAPERS_DIR, MATERIALS_DIR)
+
+
+def parse_root(value):
+    """`root:` 지시행 → 뿌리 이름. 모르는 값은 **기본값으로 떨어뜨린다.**
+
+    거부하지 않고 떨어뜨리는 이유: 이 절이 없던 시절의 러너 Issue가 계속 들어오고, 그것들은
+    전부 논문이다. 모르는 값에 실패로 답하면 러너가 오타 하나로 세션 기록을 잃는다 —
+    잘못된 뿌리에 쓰는 것보다 낫고, 안 쓰는 것보다도 낫다.
+    """
+    root = (value or "").strip().strip("/")
+    return root if root in PAPER_ROOTS else PAPERS_DIR
 
 
 def parse_meta(section):
@@ -1125,8 +1156,14 @@ def write_artifacts(folder, section, slug, today, issue_number):
 
 
 def write_paper_session(note, payload, today):
-    """세션 원문을 논문 폴더에 쓰고, 정제본·주석·READING_STATUS를 갱신한다."""
-    folder = os.path.join(PAPERS_DIR, note["slug"])
+    """세션 원문을 자료 폴더에 쓰고, 정제본·주석·READING_STATUS를 갱신한다.
+
+    뿌리는 `note["root"]`가 정한다(`papers/` 기본, `materials/`도 가능 — `parse_root`).
+    `READING_STATUS` 패치만은 여전히 `papers/READING_STATUS.md`로 간다: 자료의 진도는
+    `## 자료 진도 갱신`이라는 **다른 기계**가 담당하고(`MATERIAL_STATUS_PATH`), 그 둘을
+    섞으면 같은 파일을 두 경로가 쓰게 된다.
+    """
+    folder = os.path.join(note.get("root") or PAPERS_DIR, note["slug"])
     sessions = os.path.join(folder, "sessions")
     os.makedirs(sessions, exist_ok=True)
 
@@ -1930,14 +1967,14 @@ def main():
     if (payload.get("title") or "").startswith("[논문]"):
         note = build_paper_session(payload, args.today)
         if args.dry_run:
-            print(f"[dry-run] papers/{note['slug']}/sessions/… ({note['section']})\n")
+            print(f"[dry-run] {note['root']}/{note['slug']}/sessions/… ({note['section']})\n")
             print(note["body"])
             return
         touched, applied, extra = write_paper_session(note, payload, args.today)
         report = [
             f"✅ 논문 세션 기록 완료 — `{touched[0]}`",
             "",
-            f"- 논문: `{note['slug']}` · 섹션: {note['section']}",
+            f"- 자료: `{note['root']}/{note['slug']}` · 섹션: {note['section']}",
         ]
         if note["meta"].get("understanding"):
             report.append(f"- 이해 단계: **{note['meta']['understanding']}**")
@@ -1946,7 +1983,7 @@ def main():
             report.append(
                 f"- Parking Lot: 새 항목 {added}개"
                 + (f" · 해소 {resolved}개" if resolved else "")
-                + " → `papers/{}/parking-lot.md`".format(note["slug"])
+                + " → `{}/{}/parking-lot.md`".format(note["root"], note["slug"])
             )
         if extra["artifacts"]:
             report.append(f"- 아티팩트 {len(extra['artifacts'])}개 저장 (다음 세션 복습용)")
