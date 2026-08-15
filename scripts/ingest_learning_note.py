@@ -626,7 +626,7 @@ def build_note(payload, today):
     # 본문 맨 앞의 지시행(slug:, runner:)도 frontmatter처럼 취급하고 제거한다.
     directives = {}
     lines = body.splitlines()
-    while lines and re.match(r"^(slug|runner|course|week|exam_target|tags|track|artifact)\s*:\s*\S", lines[0].strip()):
+    while lines and re.match(r"^(slug|runner|course|week|exam_target|tags|track|artifact|turns)\s*:\s*\S", lines[0].strip()):
         key, value = lines[0].split(":", 1)
         directives[key.strip()] = value.strip()
         lines.pop(0)
@@ -676,7 +676,10 @@ def build_note(payload, today):
     # `artifact` — 세션 밖에 남은 산출물(코드·발표자료·재현 노트북)의 링크.
     # 파일럿 지표 `time_to_first_artifact`의 유일한 원자료라, 본문에 묻히지 않게
     # frontmatter로 올린다(`pilot_rollup.py`가 여기서 센다).
-    for key in ("course", "week", "exam_target", "artifact"):
+    # `turns` — 이번 세션의 대화 왕복 수(2026-08-15). 학습자 1명 월 LLM 원가 추정의
+    # **최대 불확실성**이고(입력 토큰이 턴 수의 제곱으로 자란다), 여기 없으면 영원히
+    # 가정으로 남는다. 안 적혔으면 줄을 만들지 않는다 — 0과 미기록은 다르다.
+    for key in ("course", "week", "exam_target", "artifact", "turns"):
         if user_fm.get(key):
             fm.append(f"{key}: {user_fm[key]}")
     fm.append("---")

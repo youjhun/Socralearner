@@ -65,33 +65,46 @@ PARTICIPANT_RE = re.compile(r"^P\d{2,3}$")
 # --------------------------------------------------------------------------- 읽기
 
 
-def session_dates(root):
-    """`daily/YYYY-MM-DD-*.md` 파일명에서 세션 날짜를 뽑는다 — 파일명만 본다."""
+def daily_files(root):
+    """`daily/` 아래의 세션 노트 — **하위 폴더까지** 훑는다.
+
+    ⚠️ 2026-08-15 수정. 여기는 `os.listdir`로 `daily/` 바로 밑만 봤는데, 인제스터는
+    트랙이 있으면 **`daily/<track>/`에 쓴다**(`ingest_learning_note.py`의 `note_path`).
+    러너는 트랙이 둘 이상이면 세션 시작에 "오늘은 어느 트랙?"을 묻는다 — 즉 **트랙을
+    쓰는 것이 정상 경로**다.
+
+    그래서 과목 서랍을 만든 참가자는 세션이 아무리 많아도 **롤업에 0으로 잡혔다.**
+    공부를 정리해서 한 사람일수록 안 한 것처럼 보이는, 정확히 거꾸로 된 측정이었고,
+    이 값 위에 북극성 지표(주간 활성 학습자)가 올라가 있었다.
+
+    파일명만 본다는 성질은 그대로다 — 폴더 이름(=트랙 이름)은 읽지 않는다. 트랙 이름은
+    그 사람이 무엇을 공부하는지를 드러내므로 롤업에 실리면 안 된다.
+    """
     d = os.path.join(root, DAILY_DIR)
     if not os.path.isdir(d):
         return []
-    dates = []
-    for name in os.listdir(d):
-        if not name.endswith(".md"):
-            continue
-        m = re.match(r"(\d{4}-\d{2}-\d{2})", name)
-        if m:
-            dates.append(m.group(1))
-    return sorted(dates)
+    out = []
+    for base, dirs, files in os.walk(d):
+        dirs[:] = [x for x in dirs if not x.startswith(".")]
+        for name in sorted(files):
+            m = re.match(r"(\d{4}-\d{2}-\d{2})", name)
+            if name.endswith(".md") and m:
+                out.append((m.group(1), os.path.join(base, name)))
+    # 날짜 우선, 같은 날짜면 경로로 — 트랙이 섞여도 순서가 흔들리지 않는다.
+    return sorted(out)
+
+
+def session_dates(root):
+    """세션 날짜 목록 — 파일명에서만 뽑는다."""
+    return [date for date, _ in daily_files(root)]
 
 
 def read_notes(root):
     """(날짜, 본문) 목록. 본문은 여기서만 쓰이고 롤업에는 들어가지 않는다."""
-    d = os.path.join(root, DAILY_DIR)
-    if not os.path.isdir(d):
-        return []
     notes = []
-    for name in sorted(os.listdir(d)):
-        m = re.match(r"(\d{4}-\d{2}-\d{2})", name)
-        if not name.endswith(".md") or not m:
-            continue
-        with open(os.path.join(d, name), encoding="utf-8") as f:
-            notes.append((m.group(1), f.read()))
+    for date, path in daily_files(root):
+        with open(path, encoding="utf-8") as f:
+            notes.append((date, f.read()))
     return notes
 
 
@@ -117,6 +130,21 @@ def has_artifact(body):
         return False
     value = m.group(1).strip()
     return bool(value) and not value.startswith("<")
+
+
+def turns_of(body):
+    """frontmatter의 `turns:` — 이 세션의 대화 왕복 수. 없으면 None(0이 아니다).
+
+    왜 세나 (2026-08-15): 학습자 1명 월 LLM 원가 추정에서 **가장 큰 불확실성**이 이 값이다
+    (Topdown `docs/business/cost-model.md` §7). 대화형 러너는 매 턴 이력 전체를 다시
+    보내므로 입력 토큰이 턴 수의 **제곱**으로 자란다 — 20턴 가정이 실제로 40턴이면 원가는
+    2배가 아니라 약 4배다.
+
+    없으면 0이 아니라 None인 이유는 이 파일의 다른 값과 같다 — 안 적힌 것과 0은 다르고,
+    0으로 메우면 "짧은 세션"이 실제보다 많아 보인다(그러면 원가를 낙관하게 된다).
+    """
+    m = re.search(r"^turns\s*:\s*(\d{1,3})\s*$", body, re.M)
+    return int(m.group(1)) if m else None
 
 
 def count_weak(body):
@@ -256,6 +284,46 @@ def gap_median(dates):
     return round(statistics.median(gaps), 1)
 
 
+def turns_summary(counts):
+    """대화 왕복 수의 요약. **적힌 세션만** 센다 — 분모를 흐리지 않는다.
+
+    `recorded`가 `sessions_total`보다 작으면 아직 이행 중이라는 뜻이고, 그 사실이 보여야
+    "평균 18턴"을 얼마나 믿을지 사람이 판단할 수 있다.
+    """
+    if not counts:
+        return {"recorded": 0, "median": None, "max": None}
+    return {
+        "recorded": len(counts),
+        "median": round(statistics.median(counts), 1),
+        # 원가는 제곱으로 자라므로 **가장 긴 세션**이 평균보다 중요하다.
+        "max": max(counts),
+    }
+
+
+# 파일럿 두 트랙의 완료 조건 (Topdown `docs/experiments/proof-log.md` §과제군, 2026-08-15 고정)
+LEARNING_TRACK_CONCEPTS = 5      # 개념 5개를 자료 없이 설명
+PAPER_TRACK_PARKING_RATIO = 0.5  # 밀어 둔 것의 절반 이상 해소
+
+
+def track_completion(states, park, flow):
+    """**완료했는가**를 롤업이 직접 답한다 — 원자료만 던지지 않는다.
+
+    왜 여기서 판정하나: 조건을 사람이 매번 머리로 맞추면 주마다 다르게 센다. 조건은
+    2026-08-15에 고정됐고(주제는 자유, 크기와 완료 기준만 통일), 그 판정을 코드에 두면
+    "이번 주엔 좀 후하게 봤다"가 불가능해진다.
+
+    두 트랙 모두 **노트를 썼는가**를 완료로 치지 않는다 — AI가 대신 써 준 것이 완료로
+    잡히면 학습이 일어났는지 알 수 없다(`proof-system.md` §3).
+    """
+    resolved_ratio = (park["resolved"] / park["items"]) if park["items"] else 0.0
+    return {
+        "track_learning_done": states["explained"] >= LEARNING_TRACK_CONCEPTS,
+        "track_paper_done": flow["complete"] >= 1 and resolved_ratio >= PAPER_TRACK_PARKING_RATIO,
+        # 판정의 근거를 함께 싣는다 — 참/거짓만 보내면 왜 아닌지 물어보러 와야 한다.
+        "parking_resolved_ratio": round(resolved_ratio, 2),
+    }
+
+
 def rollup(root, participant, week=None, today=None):
     """저장소 → 익명 롤업 dict. 여기서 나온 것만 밖으로 나간다."""
     if not PARTICIPANT_RE.match(participant or ""):
@@ -275,8 +343,12 @@ def rollup(root, participant, week=None, today=None):
     transfer = {"attempts": 0, "passed": 0, "partial": 0, "failed": 0, "기타": 0}
     retention = {"checks": 0, "retained": 0, "faded": 0, "lost": 0, "기타": 0}
     artifact_dates = []
+    turn_counts = []
 
     for date, body in notes:
+        t_n = turns_of(body)
+        if t_n is not None:
+            turn_counts.append(t_n)
         t = verdict_of(body, TRANSFER_SECTION, TRANSFER_VERDICTS)
         if t:
             transfer["attempts"] += 1
@@ -295,8 +367,8 @@ def rollup(root, participant, week=None, today=None):
         "participant": participant,
         "week": week,
         "generated_on": today,
-        # 2 = Parking Lot 해소율 · 논문 흐름 5단계 추가 (2026-08-15, 파일럿 두 트랙 고정)
-        "schema": 2,
+        # 3 = turns 실측 · 두 트랙 완료 판정 추가 · daily 하위 폴더 집계 수정 (2026-08-15)
+        "schema": 3,
 
         "sessions_week": len(week_dates),
         "sessions_total": len(all_dates),
@@ -316,8 +388,10 @@ def rollup(root, participant, week=None, today=None):
 
         "parking": parking(root),
         "paper_flow": paper_flow(root),
+        "turns": turns_summary(turn_counts),
 
         **concept_states(root),
+        **track_completion(concept_states(root), parking(root), paper_flow(root)),
     }
 
 
