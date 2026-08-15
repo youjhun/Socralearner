@@ -56,6 +56,15 @@ def main():
     run2, _ = g.consecutive_active(unbroken, 4, 4)
     check("끊기지 않으면 4주가 센다", run2 == 4, f"run={run2}")
 
+    # 2026-08-15 감사 F-5: 롤업이 **아예 없는 주**를 건너뛰면 W30–W32가 "연속"이 된다.
+    gap = g.by_week(rows({
+        "2026-W30": {f"P0{i}": 1 for i in range(1, 5)},
+        "2026-W32": {f"P0{i}": 1 for i in range(1, 5)},
+    }))
+    run_gap, detail_gap = g.consecutive_active(gap, 4, 4)
+    check("빠진 주는 끊김으로 본다", run_gap == 1, f"run={run_gap}")
+    check("빠진 주가 표에 0으로 나온다", ("2026-W31", 0) in detail_gap, str(detail_gap))
+
     thin = g.by_week(rows({f"2026-W{w}": {"P01": 1, "P02": 1} for w in (31, 32)}))
     run3, _ = g.consecutive_active(thin, 4, 4)
     check("활성이 기준 미만이면 0주", run3 == 0, f"run={run3}")
@@ -67,21 +76,30 @@ def main():
     ratio, total, helped = g.autonomy(weeks, {"P01": 0, "P02": 0, "P03": 0, "P04": 0})
     check("개입 0이면 자립 100%", ratio == 1.0, str(ratio))
 
-    ratio, total, _ = g.autonomy(weeks, {"P01": 4})
+    full = {"P01": 4, "P02": 0, "P03": 0, "P04": 0}
+    ratio, total, _ = g.autonomy(weeks, full)
     check("개입이 있으면 그만큼 깎인다", 0 < ratio < 1, str(ratio))
 
     # 원장 오기(개입 > 세션)로 음수가 나오면 표가 거짓말을 한다.
-    ratio, _, _ = g.autonomy(weeks, {"P01": 9999})
+    ratio, _, _ = g.autonomy(weeks, {**full, "P01": 9999})
     check("개입 수가 세션을 넘어도 음수가 되지 않는다", ratio == 0.0, str(ratio))
+
+    # 2026-08-15 감사 F-3: **일부만 적힌 원장은 계산하지 않는다.** 빠진 사람을 0으로 치면
+    # 자립률이 위로 편향되고, 편향 방향이 하필 **관문을 여는 쪽**이다.
+    ratio, _, _ = g.autonomy(weeks, {"P01": 2})
+    check("한 명이라도 안 적혔으면 측정 불가", ratio is None, str(ratio))
+    ratio, _, _ = g.autonomy(weeks, {**full, "P03": None})
+    check("`-`로 미기록을 적어도 측정 불가", ratio is None, str(ratio))
 
     print("\n③ 원장 파서")
     import tempfile
     fd, path = tempfile.mkstemp(suffix=".yaml")
     with os.fdopen(fd, "w", encoding="utf-8") as f:
-        f.write("# 개입 원장\nP01: 2\nP02: 0   # 손 안 댐\n아무말\nP0: 5\n")
+        f.write("# 개입 원장\nP01: 2\nP02: 0   # 손 안 댐\nP03: -\n아무말\nP0: 5\n")
     try:
         led = g.read_interventions(path)
-        check("P01/P02만 읽는다", led == {"P01": 2, "P02": 0}, str(led))
+        check("P01/P02/P03만 읽는다", led == {"P01": 2, "P02": 0, "P03": None}, str(led))
+        check("`-`는 미기록(None)이지 0이 아니다", led["P03"] is None and led["P02"] == 0)
         check("없는 파일은 None", g.read_interventions(path + ".nope") is None)
         check("경로가 없으면 None", g.read_interventions(None) is None)
     finally:

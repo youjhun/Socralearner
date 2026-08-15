@@ -64,16 +64,42 @@ def from_repos(repos):
     return out, unread
 
 
-def from_central(central):
-    """중앙 저장소의 `[롤업]` Issue 본문에 실린 JSON 블록."""
-    try:
-        raw = _get(f"https://api.github.com/repos/{central}/issues"
-                   f"?state=all&per_page=100&labels=", accept="application/vnd.github+json")
-    except urllib.error.HTTPError as e:
-        print(f"  ⚠️  중앙 저장소 {central} 읽기 실패 (HTTP {e.code})", file=sys.stderr)
-        return []
+def from_central(central, max_pages=10):
+    """중앙 저장소의 `[롤업]` Issue 본문에 실린 JSON 블록.
+
+    ⚠️ 2026-08-15 감사: 예전에는 **한 페이지(100건)만** 읽었다. 중앙 저장소가 개발이 활발한
+    레포라 몇 주 지나면 오래된 롤업이 첫 100건 밖으로 밀려나고, 그러면 관문 ③의 주차 이력이
+    **조용히 잘린다**(끊긴 게 아니라 안 보이는 것인데 끊김으로 읽힌다). GitHub `/issues`는
+    PR도 함께 돌려주므로 그것도 거른다 — PR이 목록을 밀어내는 주범이다.
+    """
     out = []
-    for issue in json.loads(raw):
+    for page in range(1, max_pages + 1):
+        try:
+            raw = _get(f"https://api.github.com/repos/{central}/issues"
+                       f"?state=all&per_page=100&page={page}",
+                       accept="application/vnd.github+json")
+        except urllib.error.HTTPError as e:
+            print(f"  ⚠️  중앙 저장소 {central} 읽기 실패 (HTTP {e.code})", file=sys.stderr)
+            return out
+        batch = json.loads(raw)
+        if not batch:
+            break
+        out += _rollups_in(batch)
+        if len(batch) < 100:
+            break
+    else:
+        print(f"  ⚠️  Issue {max_pages}페이지를 다 읽었다 — 더 오래된 롤업이 남아 있을 수 있다.",
+              file=sys.stderr)
+    return out
+
+
+def _rollups_in(issues):
+    out = []
+    for issue in issues:
+        # PR은 Issue 목록에 섞여 오지만 롤업이 아니다.
+        # 값이 아니라 **키 유무**로 본다 — 빈 객체가 오면 truthy 검사는 통과해 버린다.
+        if "pull_request" in issue:
+            continue
         if not (issue.get("title") or "").startswith("[롤업]"):
             continue
         m = re.search(r"```json\s*(\{.*?\})\s*```", issue.get("body") or "", re.S)

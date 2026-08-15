@@ -179,6 +179,22 @@ def main():
         finally:
             shutil.rmtree(nested, ignore_errors=True)
 
+        print("\n③-3 논문 세션도 세션이다 (2026-08-15 감사 회귀)")
+        # `[논문]` Issue는 papers/<slug>/sessions/ 로 갈라져 daily 노트를 만들지 않는다.
+        # daily/만 세던 동안 **논문 트랙 참가자는 영원히 비활성**이었다.
+        paper = tempfile.mkdtemp(prefix="pilot-paper-")
+        try:
+            write(paper, "papers/csp-2000/sessions/2026-08-03-intro.md", note("2026-08-03"))
+            write(paper, "papers/csp-2000/sessions/2026-08-05-method.md", note("2026-08-05"))
+            write(paper, "materials/lecture-3/sessions/2026-08-06-ch2.md", note("2026-08-06"))
+            pr = rollup.rollup(paper, "P08", week="2026-W32", today="2026-08-07")
+            check("논문 세션이 누적에 든다", pr["sessions_total"] == 3, str(pr["sessions_total"]))
+            check("논문 세션이 이번 주에도 든다", pr["sessions_week"] == 3)
+            check("논문만 읽어도 '복귀함'이 된다", pr["returned"] is True)
+            check("논문 slug가 결과에 나오지 않는다", "csp-2000" not in json.dumps(pr))
+        finally:
+            shutil.rmtree(paper, ignore_errors=True)
+
         print("\n④-2 Parking Lot · 논문 흐름 (2026-08-15 두 트랙)")
         check("파킹랏 항목 4 (자리표시자 제외)", data["parking"]["items"] == 4,
               str(data["parking"]))
@@ -213,21 +229,29 @@ def main():
 
         # 완료 판정 — 조건은 2026-08-15에 고정됐고 코드가 대신 기억한다.
         check("학습 트랙: 설명가능 1개면 미완료", data["track_learning_done"] is False)
-        check("논문 트랙: 완주 1편 + 파킹랏 2/4 해소 → 완료",
+        # 완료 조건은 **"그 논문의"** 파킹랏 절반 해소다 — 합산이면 A에서 푼 것이 B를 채운다.
+        check("논문 트랙: 자료 하나가 절반 넘게 해소되면 완료",
               data["track_paper_done"] is True,
-              f"flow={data['paper_flow']['complete']} ratio={data['parking_resolved_ratio']}")
-        check("해소 비율이 근거로 함께 나온다", data["parking_resolved_ratio"] == 0.5,
-              str(data["parking_resolved_ratio"]))
+              f"flow={data['paper_flow']['complete']} best={data['parking_best_ratio']}")
+        check("자료별 최고 비율이 근거로 나온다", data["parking_best_ratio"] == 0.5,
+              str(data["parking_best_ratio"]))
+        check("합산 비율도 남는다(밀어 두는 습관을 보는 값)",
+              data["parking_resolved_ratio"] == 0.5, str(data["parking_resolved_ratio"]))
+        split = rollup.track_completion(
+            {"explained": 0}, {"items": 10, "resolved": 5, "best_ratio": 0.2}, {"complete": 1})
+        check("합산은 절반이어도 자료별로 못 넘으면 미완료",
+              split["track_paper_done"] is False, str(split))
         done = rollup.track_completion(
-            {"explained": 5}, {"items": 10, "resolved": 5}, {"complete": 1})
+            {"explained": 5}, {"items": 10, "resolved": 5, "best_ratio": 0.5}, {"complete": 1})
         check("학습 트랙: 설명가능 5개면 완료", done["track_learning_done"] is True)
         half = rollup.track_completion(
-            {"explained": 0}, {"items": 10, "resolved": 4}, {"complete": 1})
+            {"explained": 0}, {"items": 10, "resolved": 4, "best_ratio": 0.4}, {"complete": 1})
         check("논문 트랙: 절반 미만 해소면 미완료", half["track_paper_done"] is False)
         noflow = rollup.track_completion(
-            {"explained": 0}, {"items": 2, "resolved": 2}, {"complete": 0})
+            {"explained": 0}, {"items": 2, "resolved": 2, "best_ratio": 1.0}, {"complete": 0})
         check("논문 트랙: 다섯 칸을 못 채웠으면 미완료", noflow["track_paper_done"] is False)
-        empty = rollup.track_completion({"explained": 0}, {"items": 0, "resolved": 0}, {"complete": 1})
+        empty = rollup.track_completion(
+            {"explained": 0}, {"items": 0, "resolved": 0, "best_ratio": None}, {"complete": 1})
         check("파킹랏이 비었으면 0으로 나누지 않고 미완료", empty["track_paper_done"] is False)
 
         print("\n⑤ 숫자를 지어내지 않는다")

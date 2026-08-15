@@ -94,15 +94,53 @@ def daily_files(root):
     return sorted(out)
 
 
+def paper_session_files(root):
+    """`papers|materials/<slug>/sessions/YYYY-MM-DD-*.md` — **논문 세션도 세션이다.**
+
+    ⚠️ 2026-08-15 감사가 잡았다. `[논문]` Issue는 `build_paper_session`으로 갈라져
+    `papers/<slug>/sessions/`에 쓰고 **daily 노트를 만들지 않는다**(`ingest_learning_note.py`
+    main의 early return). 그런데 롤업은 `daily/`만 셌다.
+
+    결과가 `daily/<track>/` 사고와 **같은 모양**이었다 — 그때는 과목을 정리한 사람이,
+    이번엔 **논문을 읽은 사람이** 안 한 것처럼 보였다. 과제군은 학습/논문 두 트랙으로
+    고정돼 있는데(proof-log §과제군) 북극성 지표는 한 트랙만 세고 있었다:
+    논문 트랙 전용 참가자는 `sessions_*` 0 · `returned` false · **영원히 비활성**.
+
+    slug(=논문 제목에서 나온다)는 읽지 않는다. 날짜만 뽑는다.
+    """
+    out = []
+    for base in MATERIAL_ROOTS:
+        d = os.path.join(root, base)
+        if not os.path.isdir(d):
+            continue
+        for slug in sorted(os.listdir(d)):
+            sdir = os.path.join(d, slug, "sessions")
+            if not os.path.isdir(sdir):
+                continue
+            for name in sorted(os.listdir(sdir)):
+                m = re.match(r"(\d{4}-\d{2}-\d{2})", name)
+                if name.endswith(".md") and m:
+                    out.append((m.group(1), os.path.join(sdir, name)))
+    return sorted(out)
+
+
+def session_files(root):
+    """세션 노트 전부 — 학습(`daily/`)과 논문(`<root>/<slug>/sessions/`) 양쪽."""
+    return sorted(daily_files(root) + paper_session_files(root))
+
+
 def session_dates(root):
-    """세션 날짜 목록 — 파일명에서만 뽑는다."""
-    return [date for date, _ in daily_files(root)]
+    """세션 날짜 목록 — 파일명에서만 뽑는다. **두 트랙을 모두 센다.**"""
+    return [date for date, _ in session_files(root)]
 
 
 def read_notes(root):
-    """(날짜, 본문) 목록. 본문은 여기서만 쓰이고 롤업에는 들어가지 않는다."""
+    """(날짜, 본문) 목록. 본문은 여기서만 쓰이고 롤업에는 들어가지 않는다.
+
+    두 트랙의 세션 원문을 모두 읽는다 — `turns:`·전이·재검증은 논문 세션에도 적힌다.
+    """
     notes = []
-    for date, path in daily_files(root):
+    for date, path in session_files(root):
         with open(path, encoding="utf-8") as f:
             notes.append((date, f.read()))
     return notes
@@ -195,7 +233,8 @@ def parking(root):
 
     항목 이름은 그 사람이 무엇을 모르는지를 그대로 드러내므로 **수만 내보낸다.**
     """
-    out = {"items": 0, "resolved": 0, "files": 0}
+    out = {"items": 0, "resolved": 0, "files": 0, "best_ratio": None}
+    ratios = []
     for base in MATERIAL_ROOTS:
         d = os.path.join(root, base)
         if not os.path.isdir(d):
@@ -205,6 +244,7 @@ def parking(root):
             if not os.path.isfile(path):
                 continue
             out["files"] += 1
+            items = resolved = 0
             with open(path, encoding="utf-8") as f:
                 for line in f:
                     # Topdown `parkingLot.ts`의 `parseLine`과 같은 규칙 — 글머리표 뒤에
@@ -212,9 +252,20 @@ def parking(root):
                     m = re.match(r"^\s*[-*]\s+(?:\[([ xX])\]\s*)?(.+?)\s*$", line)
                     if not m or m.group(2).startswith("<"):
                         continue
-                    out["items"] += 1
+                    items += 1
                     if (m.group(1) or "").lower() == "x":
-                        out["resolved"] += 1
+                        resolved += 1
+            out["items"] += items
+            out["resolved"] += resolved
+            if items:
+                ratios.append(resolved / items)
+
+    # ⚠️ 2026-08-15 감사 지적: 완료 조건은 **"그 논문의"** Parking Lot 절반 이상 해소다
+    # (proof-log §과제군). 전부 합쳐 나누면 **A 논문에서 푼 항목이 B 논문의 완료 조건을
+    # 채운다.** 그래서 자료별 비율을 따로 내고 **가장 높은 것**을 완료 판정에 쓴다 —
+    # "적어도 한 편은 절반 넘게 풀었나"가 그 조건의 뜻이기 때문이다.
+    # 합계(`items`/`resolved`)는 "얼마나 밀어 두고 얼마나 푸는 사람인가"를 보는 값으로 남긴다.
+    out["best_ratio"] = round(max(ratios), 2) if ratios else None
     return out
 
 
@@ -229,11 +280,15 @@ def paper_flow(root):
     """
     out = {"papers": 0, "complete": 0, "steps_total": 0,
            "by_step": {step: 0 for step in FLOW_STEPS}}
-    d = os.path.join(root, "papers")
-    if not os.path.isdir(d):
-        return out
-    for slug in sorted(os.listdir(d)):
-        path = os.path.join(d, slug, "meta.yaml")
+    # 두 뿌리를 다 본다 — 앱에서 종류를 「자료」로 고르면 논문도 `materials/<slug>/`에
+    # 앉는다(2026-08-15 감사). `papers/`만 보면 그 사람의 flow가 영원히 0이고,
+    # 논문 트랙 완료 판정이 영원히 false가 된다.
+    metas = []
+    for base in MATERIAL_ROOTS:
+        d = os.path.join(root, base)
+        if os.path.isdir(d):
+            metas += [os.path.join(d, s, "meta.yaml") for s in sorted(os.listdir(d))]
+    for path in metas:
         if not os.path.isfile(path):
             continue
         out["papers"] += 1
@@ -315,12 +370,15 @@ def track_completion(states, park, flow):
     두 트랙 모두 **노트를 썼는가**를 완료로 치지 않는다 — AI가 대신 써 준 것이 완료로
     잡히면 학습이 일어났는지 알 수 없다(`proof-system.md` §3).
     """
-    resolved_ratio = (park["resolved"] / park["items"]) if park["items"] else 0.0
+    # **자료 하나 기준**으로 본다 — 합산 비율을 쓰면 A 논문에서 푼 것이 B 논문의 조건을 채운다.
+    best = park.get("best_ratio")
+    pooled = (park["resolved"] / park["items"]) if park["items"] else 0.0
     return {
         "track_learning_done": states["explained"] >= LEARNING_TRACK_CONCEPTS,
-        "track_paper_done": flow["complete"] >= 1 and resolved_ratio >= PAPER_TRACK_PARKING_RATIO,
+        "track_paper_done": flow["complete"] >= 1 and (best or 0.0) >= PAPER_TRACK_PARKING_RATIO,
         # 판정의 근거를 함께 싣는다 — 참/거짓만 보내면 왜 아닌지 물어보러 와야 한다.
-        "parking_resolved_ratio": round(resolved_ratio, 2),
+        "parking_best_ratio": best,
+        "parking_resolved_ratio": round(pooled, 2),
     }
 
 

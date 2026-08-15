@@ -34,6 +34,7 @@
     python3 scripts/pilot_gates.py --central youjhun/Topdown --weeks 4
 """
 import argparse
+import datetime
 import json
 import os
 import re
@@ -52,7 +53,16 @@ PARTICIPANT_RE = re.compile(r"^P\d{2,3}$")
 
 
 def read_interventions(path):
-    """`P01: 2` 줄만 읽는다. 없으면 None — **0이 아니다.**"""
+    """개입 원장 → `{P01: 2, P02: None}`. 파일이 없으면 None(원장 자체가 없음).
+
+    ⚠️ 2026-08-15 감사가 잡은 것: **미기록을 표현할 자리가 없었다.** 원장 파일에
+    `P01: 0`을 미리 적어 두면 "아직 안 세어 봤다"가 "개입이 0이었다"로 읽히고, 그 순간
+    이 도구의 존재 이유("모르는 것은 통과가 아니다")가 자기 산출물에 의해 우회된다.
+    실제로 이번 작업이 만든 `interventions.yaml`이 `P01: 0` 다섯 줄이었다.
+
+    그래서 값에 `-`(또는 빈 값)를 허용하고 **`None`으로 싣는다.** 한 명이라도 `None`이면
+    자립률은 계산하지 않는다(아래 `autonomy`).
+    """
     if not path:
         return None
     if not os.path.exists(path):
@@ -62,9 +72,10 @@ def read_interventions(path):
     with open(path, encoding="utf-8") as f:
         for line in f:
             line = line.split("#")[0].strip()
-            m = re.match(r"^(P\d{2,3})\s*:\s*(\d+)$", line)
+            m = re.match(r"^(P\d{2,3})\s*:\s*(\d+|-)?\s*$", line)
             if m:
-                out[m.group(1)] = int(m.group(2))
+                value = m.group(2)
+                out[m.group(1)] = int(value) if value and value != "-" else None
     return out
 
 
@@ -81,6 +92,27 @@ def by_week(rows):
     return weeks
 
 
+def _week_span(weeks_sorted):
+    """`2026-W29`~`2026-W32` 사이의 **빠진 주차까지** 채워 돌려준다."""
+    if not weeks_sorted:
+        return []
+    def parse(w):
+        y, _, n = w.partition("-W")
+        return int(y), int(n)
+    def iso_weeks(year):
+        # 그 해의 마지막 ISO 주차 — 12월 28일은 언제나 마지막 주에 속한다.
+        return datetime.date(year, 12, 28).isocalendar()[1]
+
+    out, (y, n) = [], parse(weeks_sorted[0])
+    end = parse(weeks_sorted[-1])
+    while (y, n) <= end:
+        out.append(f"{y}-W{n:02d}")
+        n += 1
+        if n > iso_weeks(y):
+            y, n = y + 1, 1
+    return out
+
+
 def consecutive_active(weeks, need_learners, need_weeks):
     """**연속** 주수를 센다 — 합계가 아니다.
 
@@ -88,10 +120,15 @@ def consecutive_active(weeks, need_learners, need_weeks):
     아니라 **끊기지 않음**이므로 최근 주차부터 거꾸로 이어지는 길이만 센다.
     """
     # 표는 **전 주차**를 담는다 — 끊긴 지점 앞을 지우면 "왜 끊겼나"를 볼 수 없다.
-    detail = [
-        (w, sum(1 for r in weeks[w].values() if (r.get("sessions_week") or 0) > 0))
-        for w in sorted(weeks)
-    ]
+    observed = {
+        w: sum(1 for r in weeks[w].values() if (r.get("sessions_week") or 0) > 0)
+        for w in weeks
+    }
+    # ⚠️ 롤업이 **아예 없는 주**를 건너뛰면 W30–W32가 "연속"이 된다(W31이 통째로 비어도).
+    # 그래서 관측된 주차의 처음~끝을 ISO 주차로 채워, 빈 주는 활성 0으로 본다 —
+    # "그 주엔 아무도 안 했다"와 "그 주는 안 재었다"를 구별할 방법이 없고, 둘 중
+    # **관문을 여는 쪽으로 유리한 해석을 고르지 않는다**.
+    detail = [(w, observed.get(w, 0)) for w in _week_span(sorted(observed))]
     run = 0
     for _, active in reversed(detail):
         if active < need_learners:
@@ -101,11 +138,20 @@ def consecutive_active(weeks, need_learners, need_weeks):
 
 
 def autonomy(weeks, interventions):
-    """개입 없이 시작한 세션의 비율. 원장이 없으면 None."""
+    """개입 없이 시작한 세션의 비율. 원장이 없거나 **한 명이라도 미기록이면** None.
+
+    한 명만 비어 있어도 계산하지 않는 이유: 그 사람의 개입을 0으로 치면 자립률이 위로
+    편향되고, 편향의 방향이 **관문을 여는 쪽**이다. 부분 데이터로 낸 값은 정확해 보이지만
+    틀린 쪽으로 틀린다.
+    """
     if interventions is None:
         return None, 0, 0
+    people = {p for w in weeks.values() for p in w}
+    # 롤업에 잡힌 참가자 중 원장에 값이 없는 사람 — 미기록이거나 아예 안 적힌 사람.
+    if any(interventions.get(pid) is None for pid in people):
+        return None, 0, 0
     total = 0
-    for pid in {p for w in weeks.values() for p in w}:
+    for pid in people:
         latest = max(
             (weeks[w][pid] for w in weeks if pid in weeks[w]),
             key=lambda r: r.get("generated_on") or "",
@@ -159,7 +205,7 @@ def main():
     enough_people = len(people) >= GATE_PARTICIPANTS
     if ratio is None:
         gate2 = False
-        line2 = "측정 불가 — 개입 원장이 없다(0%로 치지 않는다)"
+        line2 = "측정 불가 — 개입 원장이 없거나 비어 있다 (0%로 치지 않는다)"
     else:
         gate2 = enough_people and ratio >= GATE_AUTONOMY_RATIO
         line2 = (f"자립 {ratio:.0%} (세션 {sessions} 중 개입 {helped}) · "
