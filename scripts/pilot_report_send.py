@@ -44,6 +44,8 @@ ALLOWED_KEYS = {
     "session_gap_median_days",
     "transfer", "retention",
     "artifacts_total", "first_artifact", "open_blockers",
+    # 2026-08-15 — 파일럿 두 트랙의 완료 조건. 둘 다 **수만** 담는다(항목 이름·논문 제목 없음).
+    "parking", "paper_flow",
     "concepts_total", "explained", "memorized", "unlearned",
     "prereq_edges", "domains", "with_evidence",
 }

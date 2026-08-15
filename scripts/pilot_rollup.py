@@ -42,6 +42,13 @@ from ingest_learning_note import pop_section  # noqa: E402  — 절 추출은 �
 
 DAILY_DIR = "daily"
 CONCEPTS_PATH = "concepts.json"
+# Parking Lot과 논문 meta가 사는 두 뿌리. Topdown의 `MATERIAL_ROOTS`와 같은 값이다.
+MATERIAL_ROOTS = ("papers", "materials")
+
+# 논문 흐름 5단계 — `ingest_learning_note.FLOW_STEPS`와 같아야 한다.
+# 여기서 다시 적는 이유: 이 스크립트는 참가자 저장소에서 단독 실행될 수 있고, 그때
+# import가 깨지면 롤업 전체가 죽는다. 대신 아래 test가 두 값이 같은지 확인한다.
+FLOW_STEPS = ("문제", "한계", "방법", "실험", "결과")
 
 TRANSFER_SECTION = "전이 시도"
 RETENTION_SECTION = "7일 재검증"
@@ -150,6 +157,75 @@ def concept_states(root):
     return out
 
 
+def parking(root):
+    """Parking Lot — **몇 개를 밀어 뒀고 몇 개를 풀었나.** 항목 이름은 읽지 않는다.
+
+    왜 이 지표인가 (2026-08-15, 논문 트랙 완료 조건 ②): "모르는 것을 그냥 넘겼는가"를
+    사람 판정 없이 잴 수 있는 **유일한** 지표다. 넘기는 사람은 두 모습으로 나타난다 —
+    아예 안 적거나(목록이 빔), 적기만 하고 안 푼다(쌓이기만 함). 둘 다 파일만 세면 나온다.
+    게다가 이것은 학습자가 **스스로 적은 빚**이라 잘 보이려고 꾸밀 이유가 없다.
+
+    항목 이름은 그 사람이 무엇을 모르는지를 그대로 드러내므로 **수만 내보낸다.**
+    """
+    out = {"items": 0, "resolved": 0, "files": 0}
+    for base in MATERIAL_ROOTS:
+        d = os.path.join(root, base)
+        if not os.path.isdir(d):
+            continue
+        for slug in sorted(os.listdir(d)):
+            path = os.path.join(d, slug, "parking-lot.md")
+            if not os.path.isfile(path):
+                continue
+            out["files"] += 1
+            with open(path, encoding="utf-8") as f:
+                for line in f:
+                    # Topdown `parkingLot.ts`의 `parseLine`과 같은 규칙 — 글머리표 뒤에
+                    # 공백이 있어야 하고, `- <항목>` 자리표시자는 항목이 아니다.
+                    m = re.match(r"^\s*[-*]\s+(?:\[([ xX])\]\s*)?(.+?)\s*$", line)
+                    if not m or m.group(2).startswith("<"):
+                        continue
+                    out["items"] += 1
+                    if (m.group(1) or "").lower() == "x":
+                        out["resolved"] += 1
+    return out
+
+
+def paper_flow(root):
+    """논문 흐름 5단계 — 몇 편에서 어느 단계까지 통과했나. **제목·slug는 읽지 않는다.**
+
+    `understanding`의 4단계는 어디서 막혔는지를 뭉갠다(방법은 알고 실험 설계를 못 읽는
+    사람과 그 반대가 같은 「부분 이해」다). 다섯 칸으로 세면 **사람마다 다른 구멍**이
+    보이고, 그것이 다음 개선의 재료다.
+
+    `complete`(5/5)가 논문 트랙 완료 조건 ①이다.
+    """
+    out = {"papers": 0, "complete": 0, "steps_total": 0,
+           "by_step": {step: 0 for step in FLOW_STEPS}}
+    d = os.path.join(root, "papers")
+    if not os.path.isdir(d):
+        return out
+    for slug in sorted(os.listdir(d)):
+        path = os.path.join(d, slug, "meta.yaml")
+        if not os.path.isfile(path):
+            continue
+        out["papers"] += 1
+        steps = set()
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                if line.lstrip().startswith("#"):
+                    continue
+                key, sep, value = line.partition(":")
+                if sep and key.strip() == "flow":
+                    steps = {w.strip() for w in re.split(r"[,·/]|\s+", value)} & set(FLOW_STEPS)
+                    break
+        for step in steps:
+            out["by_step"][step] += 1
+        out["steps_total"] += len(steps)
+        if len(steps) == len(FLOW_STEPS):
+            out["complete"] += 1
+    return out
+
+
 # --------------------------------------------------------------------------- 계산
 
 
@@ -219,7 +295,8 @@ def rollup(root, participant, week=None, today=None):
         "participant": participant,
         "week": week,
         "generated_on": today,
-        "schema": 1,
+        # 2 = Parking Lot 해소율 · 논문 흐름 5단계 추가 (2026-08-15, 파일럿 두 트랙 고정)
+        "schema": 2,
 
         "sessions_week": len(week_dates),
         "sessions_total": len(all_dates),
@@ -236,6 +313,9 @@ def rollup(root, participant, week=None, today=None):
         "artifacts_total": len(artifact_dates),
         "first_artifact": artifact_dates[0] if artifact_dates else None,
         "open_blockers": open_blockers,
+
+        "parking": parking(root),
+        "paper_flow": paper_flow(root),
 
         **concept_states(root),
     }
@@ -265,6 +345,8 @@ def main():
             f"(누적 {data['sessions_total']}) · 개념 {data['concepts_total']}"
             f"(설명가능 {data['explained']}) · 전이 {data['transfer']['passed']}/"
             f"{data['transfer']['attempts']} · 산출물 {data['artifacts_total']}"
+            f" · 파킹랏 {data['parking']['resolved']}/{data['parking']['items']} 해소"
+            f" · 논문흐름 완주 {data['paper_flow']['complete']}/{data['paper_flow']['papers']}"
         )
     else:
         print(text)

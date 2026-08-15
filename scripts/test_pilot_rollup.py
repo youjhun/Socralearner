@@ -92,6 +92,27 @@ def build_repo(root):
     }, ensure_ascii=False))
     del CONCEPTS
 
+    # Parking Lot 두 벌 — 논문 하나, 자료 하나. 항목 이름은 그 사람이 무엇을 모르는지를
+    # 그대로 드러내므로 여기 심어 두고 결과 JSON에 없음을 확인한다.
+    write(root, "papers/csp-2000/parking-lot.md",
+          "# Parking Lot\n\n"
+          "- [x] 프레셰 평균 — 해소함\n"
+          "- [ ] 감각운동리듬 대역\n"
+          "- <항목>\n")           # 자리표시자는 항목이 아니다
+    write(root, "materials/lecture-3/parking-lot.md",
+          "- [X] 공분산 추정\n- 탄젠트 공간\n")   # 체크 없는 줄도 항목이다
+
+    # 논문 흐름 — 한 편은 완주(5/5), 한 편은 세 단계까지.
+    write(root, "papers/csp-2000/meta.yaml",
+          "# 논문 서지\n"
+          "slug: csp-2000\ntitle: 공통공간패턴\n"
+          "flow: 문제, 한계, 방법, 실험, 결과\nupdated: 2026-08-06\n")
+    write(root, "papers/riemann-2017/meta.yaml",
+          "slug: riemann-2017\ntitle: 감각운동리듬\n"
+          "flow: 문제, 한계, 방법\nupdated: 2026-08-06\n")
+    # flow가 아직 없는 논문 — 0단계로 세어야지 죽으면 안 된다.
+    write(root, "papers/new-paper/meta.yaml", "slug: new-paper\nupdated: 2026-08-06\n")
+
 
 def main():
     root = tempfile.mkdtemp(prefix="pilot-rollup-")
@@ -137,6 +158,21 @@ def main():
         check("선수관계 2", data["prereq_edges"] == 2, str(data["prereq_edges"]))
         check("분야 3", data["domains"] == 3, str(data["domains"]))
         check("근거 있는 개념 1", data["with_evidence"] == 1)
+
+        print("\n④-2 Parking Lot · 논문 흐름 (2026-08-15 두 트랙)")
+        check("파킹랏 항목 4 (자리표시자 제외)", data["parking"]["items"] == 4,
+              str(data["parking"]))
+        check("해소 2 (대소문자 X도 해소)", data["parking"]["resolved"] == 2)
+        check("파킹랏 파일 2 (papers + materials)", data["parking"]["files"] == 2)
+        check("논문 3편", data["paper_flow"]["papers"] == 3, str(data["paper_flow"]))
+        check("흐름 완주 1편", data["paper_flow"]["complete"] == 1)
+        check("통과 단계 합 8 (5+3+0)", data["paper_flow"]["steps_total"] == 8)
+        check("'문제'는 2편에서 통과", data["paper_flow"]["by_step"]["문제"] == 2)
+        check("'결과'는 1편에서만", data["paper_flow"]["by_step"]["결과"] == 1)
+        # 참가자 저장소에서 단독 실행되므로 import 없이 상수를 다시 적었다 — 갈리면 잡는다.
+        import ingest_learning_note as ingest  # noqa: PLC0415 — 이 검사에서만 필요
+        check("FLOW_STEPS가 인제스터와 같다", rollup.FLOW_STEPS == ingest.FLOW_STEPS,
+              f"{rollup.FLOW_STEPS} vs {ingest.FLOW_STEPS}")
 
         print("\n⑤ 숫자를 지어내지 않는다")
         empty = tempfile.mkdtemp(prefix="pilot-empty-")
