@@ -334,6 +334,18 @@ slug: ee202-lec08
         meta = open(meta_path, encoding="utf-8").read()
         check("meta.yaml은 키 단위로 병합된다", "title: T" in meta and "비판적 이해" in meta, meta)
 
+        # flow만 합집합 — 여러 세션에 걸쳐 통과한 단계가 덮어써지면 완료 판정이 안 난다.
+        flow_path = os.path.join(tmp, "meta-flow.yaml")
+        ingest.merge_meta(flow_path, {"flow": "한계, 문제"}, "p", "2026-08-15")
+        ingest.merge_meta(flow_path, {"flow": "방법"}, "p", "2026-08-16")
+        flow_meta = open(flow_path, encoding="utf-8").read()
+        check("flow는 세션을 넘어 쌓인다", "flow: 문제, 한계, 방법" in flow_meta, flow_meta)
+        # 다른 키를 적은 세션이 flow를 지우면 안 된다(러너는 이번에 통과한 것만 적는다).
+        ingest.merge_meta(flow_path, {"understanding": "기능적 이해"}, "p", "2026-08-17")
+        check("flow는 안 적은 세션에도 남는다",
+              "flow: 문제, 한계, 방법" in open(flow_path, encoding="utf-8").read())
+        check("모르는 단계 이름은 버린다", ingest.merge_flow(None, "요약, 결론") == "")
+
         # ⑦ Position 절 — 이미 세션을 한 번 돌린(=템플릿 갱신 전에 만들어진) 파일에도
         #    뒤늦게 절이 생겨야 다음 세션의 패치가 조용히 버려지지 않는다.
         reading_path = os.path.join(tmp, "READING_STATUS.md")

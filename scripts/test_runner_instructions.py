@@ -58,7 +58,12 @@ CONTRACT = (
     "read_doc",
     "save_session",
     "continuationToken",
-    "artifact:",
+    # 2026-08-15: `artifact`·`turns`는 이제 **필드**다. 예전에는 지침이 "본문 맨 첫 줄에
+    # `artifact:`를 적어라"라고 했는데, MCP 경로에서는 본문을 **서버가 렌더하므로**
+    # 러너가 적을 자리가 없었다(감사 F-1). 지시행을 찍는 것은 `mcp-core/render.ts`이고
+    # 지침은 필드 이름만 알면 된다.
+    "artifact",
+    "turns",
 )
 
 failures = []

@@ -156,8 +156,19 @@ PARKING_SECTION = "Parking Lot"
 ARTIFACT_SECTION = "아티팩트"
 META_SECTION = "메타"
 # meta.yaml에 받는 키. 모르는 키는 버린다 — 러너가 지어낸 필드로 파일이 자라지 않게.
-META_KEYS = ("title", "authors", "year", "venue", "link", "understanding", "next_section")
+META_KEYS = ("title", "authors", "year", "venue", "link", "understanding", "flow", "next_section")
 UNDERSTANDING = ("미이해", "부분 이해", "기능적 이해", "비판적 이해")
+
+# 논문 흐름 5단계 — **사용자가 자기 말로 설명해 통과한 단계만** 여기 쌓인다.
+#
+# 왜 단계 이름의 나열인가 (2026-08-15): 파일럿 논문 트랙의 완료 조건이 "논문의 흐름을
+# 실제로 이해했는가"인데, `understanding`의 4단계는 그것을 통째로 뭉갠다 — 방법만 알고
+# 실험 설계를 못 읽는 사람과 그 반대인 사람이 같은 「부분 이해」로 접힌다. 다섯 칸으로
+# 나눠 두면 **어디서 막히는지가 사람마다 다르게 보이고**, 그것이 다음 개선의 재료다.
+#
+# 점수를 매기지 않는 이유는 이 저장소의 다른 판정과 같다 — 숫자는 정확해 보이지만
+# 설명하지 못한다. 통과한 단계를 적고, 안 적힌 것은 아직 아닌 것이다.
+FLOW_STEPS = ("문제", "한계", "방법", "실험", "결과")
 READING_STATUS_SECTION = "READING_STATUS 갱신"
 READING_STATUS_PATH = os.path.join(PAPERS_DIR, "READING_STATUS.md")
 
@@ -615,7 +626,7 @@ def build_note(payload, today):
     # 본문 맨 앞의 지시행(slug:, runner:)도 frontmatter처럼 취급하고 제거한다.
     directives = {}
     lines = body.splitlines()
-    while lines and re.match(r"^(slug|runner|course|week|exam_target|tags|track|artifact)\s*:\s*\S", lines[0].strip()):
+    while lines and re.match(r"^(slug|runner|course|week|exam_target|tags|track|artifact|turns)\s*:\s*\S", lines[0].strip()):
         key, value = lines[0].split(":", 1)
         directives[key.strip()] = value.strip()
         lines.pop(0)
@@ -665,7 +676,10 @@ def build_note(payload, today):
     # `artifact` — 세션 밖에 남은 산출물(코드·발표자료·재현 노트북)의 링크.
     # 파일럿 지표 `time_to_first_artifact`의 유일한 원자료라, 본문에 묻히지 않게
     # frontmatter로 올린다(`pilot_rollup.py`가 여기서 센다).
-    for key in ("course", "week", "exam_target", "artifact"):
+    # `turns` — 이번 세션의 대화 왕복 수(2026-08-15). 학습자 1명 월 LLM 원가 추정의
+    # **최대 불확실성**이고(입력 토큰이 턴 수의 제곱으로 자란다), 여기 없으면 영원히
+    # 가정으로 남는다. 안 적혔으면 줄을 만들지 않는다 — 0과 미기록은 다르다.
+    for key in ("course", "week", "exam_target", "artifact", "turns"):
         if user_fm.get(key):
             fm.append(f"{key}: {user_fm[key]}")
     fm.append("---")
@@ -1034,6 +1048,31 @@ def parse_meta(section):
     return meta
 
 
+def merge_flow(old, new):
+    """`flow:`만 **합집합**으로 병합한다 — 다른 키와 달리 덮어쓰지 않는다.
+
+    한 논문의 다섯 단계는 여러 세션에 걸쳐 통과한다. 1주차에 문제·한계를 설명했고
+    2주차에 방법을 설명했다면, 2주차 노트에는 `flow: 방법`만 적히는 것이 정상이다
+    (러너는 **이번 세션에 통과한 것**을 적는다). 다른 키처럼 덮어쓰면 앞선 두 단계가
+    조용히 사라지고, 완료 판정은 영원히 안 난다.
+
+    누적을 러너에게 맡기지 않는 이유: 이 파일의 다른 키와 같은 이유다 — 매 세션 전부
+    다시 적으라고 하면 지어낸다. 기억은 기계가 한다.
+
+    합집합이라 **빼는 방향은 없다.** 잘못 올라간 단계는 `meta.yaml`을 직접 고친다
+    (판정이 올라가기만 하는 성질은 `understanding`도 같고, 되돌리는 일은 드물다).
+    """
+    seen = set()
+    for text in (old or "", new or ""):
+        for word in re.split(r"[,·/]|\s+", text):
+            word = word.strip()
+            if word in FLOW_STEPS:
+                seen.add(word)
+    # 원문 순서(문제→한계→방법→실험→결과)로 되돌려 적는다 — 러너가 적은 순서가 아니라
+    # 논문이 흐르는 순서여야 사람이 읽고 "어디서 끊겼나"를 본다.
+    return ", ".join(step for step in FLOW_STEPS if step in seen)
+
+
 def merge_meta(path, meta, slug, today):
     """meta.yaml을 **키 단위로** 병합한다 — 안 온 키는 지우지 않는다.
 
@@ -1048,7 +1087,13 @@ def merge_meta(path, meta, slug, today):
                 if ":" in line and not line.lstrip().startswith("#"):
                     key, _, value = line.partition(":")
                     existing[key.strip()] = value.strip()
+    # `flow`만 합집합(위 merge_flow) — 나머지는 이번 세션 값으로 덮어쓴다.
+    flow = merge_flow(existing.get("flow"), meta.get("flow"))
     existing.update(meta)
+    if flow:
+        existing["flow"] = flow
+    else:
+        existing.pop("flow", None)
     existing["slug"] = slug
     existing["updated"] = today
 
@@ -1056,6 +1101,7 @@ def merge_meta(path, meta, slug, today):
     lines = [
         "# 논문 서지 + 현재 이해 단계 — 러너가 세션 시작에 읽는다.",
         f"# understanding: {' / '.join(UNDERSTANDING)}",
+        f"# flow: 사용자가 자기 말로 설명해 통과한 단계만 — {' / '.join(FLOW_STEPS)}",
     ]
     for key in order:
         if key in existing:
