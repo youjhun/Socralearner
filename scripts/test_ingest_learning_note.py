@@ -18,6 +18,7 @@
 """
 import json
 import os
+import re
 import sys
 import tempfile
 
@@ -900,15 +901,27 @@ updated: 2026-08-02
 
     # ⚠️ 워크플로가 파일을 쓰고도 커밋하지 않는 조용한 실패 — 경계 주석과 `git add`가
     #    함께 갱신돼야 한다. 하나만 고치면 설계도가 영원히 저장소에 안 올라간다.
-    print("\n[워크플로] 설계도가 커밋 범위에 있다")
+    print("\n[워크플로] 쓰는 경로가 전부 커밋 범위에 있다")
     repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     wf = open(os.path.join(repo_root, ".github", "workflows", "learning-note-ingest.yml"),
               encoding="utf-8").read()
-    add_line = [l for l in wf.splitlines() if "git add -A daily" in l]
-    check("git add 범위에 learning-spec.md", bool(add_line) and "learning-spec.md" in add_line[0],
-          add_line[0] if add_line else "(git add 줄을 못 찾음)")
+    # 커밋 스텝의 `for p in … ; do git add …` 목록을 통째로 읽는다. 줄바꿈(`\`)이 있어서
+    # 한 줄만 보면 안 된다 — 2026-08-15에 목록을 늘리며 여러 줄이 됐다.
+    m = re.search(r"for p in (.+?); do\s*\n\s*git add", wf, re.S)
+    add_scope = (m.group(1).replace("\\\n", " ") if m else "")
+    #
+    # 2026-08-15 실측: 셋이 빠져 있었고 `|| git add -A` 폴백이 그것을 가리고 있었다.
+    # `mastery/` 조각이 가장 위험하다 — 안 남으면 한 세션의 승급을 복구할 곳이 없다.
+    for want in ("daily", "materials", "papers", "STATUS.md", "mastery.md", "drills.md",
+                 "concepts.json", "topics.yaml", "tracks.yaml", "learning-spec.md",
+                 "subjects.yaml", "concepts-overrides.yaml", "mastery/**"):
+        check(f"커밋 범위에 {want}", want in add_scope, add_scope or "(git add 목록을 못 찾음)")
+    # 폴백에 기대면 목록이 틀려도 안 터진다 — 그래서 폴백이 목록을 대신하면 안 된다.
+    check("`|| git add -A` 폴백에 기대지 않는다", "|| git add -A\n" not in wf and
+          "|| git add -A " not in wf, "폴백이 아직 목록을 대신하고 있다")
     boundary = [l for l in wf.splitlines() if l.startswith("# 경계:")]
-    check("경계 주석도 함께 갱신됐다", bool(boundary) and "learning-spec.md" in boundary[0],
+    check("경계 주석도 함께 갱신됐다",
+          bool(boundary) and all(w in boundary[0] for w in ("learning-spec.md", "subjects.yaml")),
           boundary[0] if boundary else "(경계 주석을 못 찾음)")
 
     print("\n[학습] 자료 진도 갱신")
