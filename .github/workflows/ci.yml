@@ -27,6 +27,7 @@ jobs:
 
       # 하나씩 돌린다 — 어느 것이 깨졌는지 로그를 열지 않고 알 수 있다.
       - run: python3 scripts/test_build_concepts.py
+      - run: python3 scripts/test_consolidate_mastery.py
       - run: python3 scripts/test_ingest_learning_note.py
       - run: python3 scripts/test_pilot_rollup.py
       - run: python3 scripts/test_pilot_gates.py

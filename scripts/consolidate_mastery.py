@@ -12,7 +12,10 @@
 로컬: `python3 scripts/consolidate_mastery.py` (repo 루트에서).
 
 행 형식(6열): | 개념 | 상태 | 중요도 | 최근 검증일 | 증거 | 변화 메모 |
-개념(1열) 기준 dedup, 검증일(4열) 최신 우선. 마커 밖(서사·상태정의)은 그대로 보존.
+개념(1열) 기준 dedup, 검증일(4열) 최신 우선 — 단 **빈 칸은 주장이 아니다**: 새 행이
+이겨도 빈 칸은 옛 값을 지킨다(필드별 병합, 2026-08-17). MCP 승급 조각이 중요도를 비워
+보내므로, 행 통째 교체면 원장의 중요도가 승급마다 지워진다. 마커 밖(서사·상태정의)은
+그대로 보존.
 """
 import glob
 import os
@@ -68,7 +71,9 @@ def consolidate(mastery_path):
                 order.append(c)
                 merged[c] = row
             elif date_key(row) >= date_key(merged[c]):
-                merged[c] = row
+                # 필드별 병합 — 빈 칸은 주장이 아니라 "이 칸은 모른다"다(머리말).
+                old = merged[c]
+                merged[c] = [new if new.strip() else old[i] for i, new in enumerate(row)]
 
     apply(parse_rows(table_part))  # 기존 표 = baseline
 

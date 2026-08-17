@@ -899,6 +899,49 @@ updated: 2026-08-02
         finally:
             os.chdir(cwd)
 
+    # ⚠️ 승급 조각의 자리 맞춤 (2026-08-17 실측) — MCP의 3열 표를 그대로 접으면 근거가
+    #    중요도 칸에 앉고, 영문 상태가 원장→concepts.json까지 흘러 「설명가능」 판정에
+    #    영영 안 잡힌다. 이 변환이 그 사슬의 입구다.
+    print("\n[이해도 승급] MCP 3열 표 → 원장 6열")
+    three_col = (
+        "| 개념 | 승급 | 근거 |\n"
+        "|---|---|---|\n"
+        "| DTW | can_explain | 시험에서 유도함 |\n"
+        "| SVD | memorized | 계산 수행 |\n"
+        "| 새어휘 | unknown_state | 근거 |\n"
+    )
+    fixed = ingest.normalize_mastery_table(three_col, "2026-08-17", "daily/2026-08-17-dtw.md")
+    check(
+        "6열 머리가 consolidate와 바이트 동일하다 (동조)",
+        fixed.splitlines()[0] == ingest.MASTERY_HEADER,
+        fixed.splitlines()[0],
+    )
+    check(
+        "상태가 원장 어휘로 번역된다 · 중요도는 비고 · 검증일=세션 날짜 · 증거=노트 링크",
+        "| DTW | 설명가능 |  | 2026-08-17 | [[daily/2026-08-17-dtw]] | 시험에서 유도함 |" in fixed,
+        fixed,
+    )
+    check("memorized → 암기", "| SVD | 암기 |" in fixed)
+    check(
+        "모르는 승급 어휘는 지어내지 않고 그대로 둔다",
+        "| 새어휘 | unknown_state |" in fixed,
+    )
+    six_col = (
+        "| 개념 | 상태 | 중요도 | 최근 검증일 | 증거 | 변화 메모 |\n"
+        "|---|---|---|---|---|---|\n"
+        "| p-value | 설명가능 | H | 2026-08-07 | [[daily/2026-08-07-eeg]] | 조건부 확률로 설명 |\n"
+    )
+    check(
+        "옛 6열 표는 손대지 않는다",
+        ingest.normalize_mastery_table(six_col, "2026-08-17", "daily/x.md") == six_col,
+    )
+    esc = "| 개념 | 승급 | 근거 |\n|---|---|---|\n| A | memorized | 좌\\|우 구분 |\n"
+    check(
+        "이스케이프된 파이프는 칸 경계가 아니다",
+        "| A | 암기 |  | 2026-08-17 | [[daily/x]] | 좌\\|우 구분 |"
+        in ingest.normalize_mastery_table(esc, "2026-08-17", "daily/x.md"),
+    )
+
     # ⚠️ 워크플로가 파일을 쓰고도 커밋하지 않는 조용한 실패 — 경계 주석과 `git add`가
     #    함께 갱신돼야 한다. 하나만 고치면 설계도가 영원히 저장소에 안 올라간다.
     print("\n[워크플로] 쓰는 경로가 전부 커밋 범위에 있다")

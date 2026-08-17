@@ -811,11 +811,66 @@ def append_drills(section, date, path=DRILLS_PATH):
     return len(fresh)
 
 
+# 원장 표의 6열 — consolidate_mastery.py의 HEADER와 **바이트 동일**해야 한다
+# (test_consolidate_mastery.py의 동조 확인이 문다). 조각과 원장이 다른 머리를 달면
+# 사람이 조각을 읽을 때 칸을 잘못 센다.
+MASTERY_HEADER = "| 개념 | 상태 | 중요도 | 최근 검증일 | 증거(daily 세션) | 변화 메모(무엇이·왜 바뀌었나) |"
+MASTERY_SEP = "|---|---|---|---|---|---|"
+
+# 러너의 승급 어휘(MCP `masteryDeltas.to`) → 원장의 상태 어휘.
+# Topdown의 오버레이 거울(`packages/graph`의 `masteryStateFromRunner`)과 같은 표다 —
+# 어긋나면 CI가 따라잡는 순간 그래프의 상태 문자열이 바뀐다.
+MASTERY_STATE_KO = {"can_explain": "설명가능", "memorized": "암기"}
+
+
+def normalize_mastery_table(section, date, note_path):
+    """MCP의 3열 승급 표(`| 개념 | 승급 | 근거 |`)를 원장의 6열로 바꾼다.
+
+    왜 (2026-08-17 실측): 조각은 consolidate_mastery가 원장에 **자리 그대로** 접는다.
+    3열을 그대로 두면 ① 근거가 중요도 칸에 앉고 ② 영문 상태(`can_explain`)가 원장을
+    지나 concepts.json까지 흘러 「설명가능」 판정(`MASTERED`)에 영영 안 잡힌다.
+
+    바꾸는 규칙:
+      상태     승급 어휘를 원장 어휘로(모르는 값은 그대로 — 지어내지 않는다)
+      중요도   비워 둔다 — consolidate의 필드별 병합이 원장의 기존 값을 지킨다
+      검증일   세션 날짜(승급의 검증이 곧 그 세션이다)
+      증거     세션 노트 링크(옛 조각의 관용구 그대로)
+      메모     러너가 보낸 근거 전문
+
+    **옛(6열) 표는 그대로 둔다** — 3열 데이터 행만 있는 표일 때만 다시 만든다.
+    """
+    lines = section.splitlines()
+    data, other = [], []
+    for line in lines:
+        s = line.strip()
+        if not s.startswith("|"):
+            other.append(line)
+            continue
+        # `\|`(러너가 이스케이프한 파이프)는 칸 경계가 아니다.
+        cells = [c.strip() for c in re.split(r"(?<!\\)\|", s.strip("|"))]
+        first = cells[0] if cells else ""
+        if not first or first == "개념" or set(first) <= set("-: "):
+            continue  # 머리·구분선 — 3열 표라면 아래서 6열 머리로 다시 단다
+        data.append(cells)
+
+    if not data or any(len(c) != 3 for c in data):
+        return section  # 3열 표가 아니다(옛 6열 조각 등) — 손대지 않는다
+
+    link = "[[%s]]" % (note_path[:-3] if note_path.endswith(".md") else note_path)
+    rows = [
+        "| " + " | ".join([concept, MASTERY_STATE_KO.get(state, state), "", date, link, memo]) + " |"
+        for concept, state, memo in data
+    ]
+    head = [l for l in other if l.strip()]
+    return "\n".join(head + ([""] if head else []) + [MASTERY_HEADER, MASTERY_SEP] + rows)
+
+
 def write_mastery_fragment(section, track, date, slug, note_path):
     """`## 이해도 승급` 표를 create-only 조각으로 떨군다 → consolidate_mastery.py가 접는다.
 
     러너는 여기서도 큰 mastery.md를 건드리지 않는다. 판단(승급 여부)은 세션의 몫이고
-    이 함수는 옮겨 적기만 한다.
+    이 함수는 옮겨 적기만 한다 — 단 MCP의 3열 표는 원장의 6열로 자리를 맞춰 적는다
+    (`normalize_mastery_table`).
     """
     if not section.strip():
         return None
@@ -860,6 +915,7 @@ def write_mastery_fragment(section, track, date, slug, note_path):
         f"> 세션 근거: [[{note_path[:-3]}]]",
         "",
     ]
+    section = normalize_mastery_table(section, date, note_path)
     with open(path, "w", encoding="utf-8") as f:
         f.write("\n".join(header) + "\n" + section.strip() + "\n")
     return path
