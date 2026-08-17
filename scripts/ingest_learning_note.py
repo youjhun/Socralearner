@@ -2188,89 +2188,97 @@ def main():
                     f.write(text + "\n")
             return
 
-        # 트랙(학습 서랍)과 주제(논문 수집)는 같은 `[설정]` Issue로 온다 — 둘 다 설정이고,
-        # 사용자에게 "이건 어느 Issue로 쓰지"를 고르게 하지 않는다.
-        tracks = build_tracks(payload)
-        if tracks:
-            added, updated, removed = merge_tracks(tracks)
-            report = [f"✅ 학습 트랙 갱신 — `{TRACKS_PATH}`", ""]
-            if added:
-                report.append(f"- 추가: {', '.join(f'`{t}`' for t in added)} → 세션은 `daily/<id>/`에 쌓인다")
-            if updated:
-                report.append(f"- 갱신: {', '.join(f'`{t}`' for t in updated)}")
-            if removed:
-                report.append(
-                    f"- 목록에서 제거: {', '.join(f'`{t}`' for t in removed)} "
-                    "(그동안의 기록은 지우지 않는다)"
-                )
-            report += ["", "> 다음 세션부터 러너가 \"오늘은 어느 트랙?\"을 묻고 그 폴더에 저장한다."]
-            text = "\n".join(report)
+        # `[설정]`의 네 절(트랙·지도·분야·주제)은 **전부 독립으로 처리한다** — 한 Issue에
+        # 몇 절을 적든 각각 반영되고 보고도 각각 쌓인다. 2026-08-17 전에는 두 구멍이
+        # 있었다: 트랙 다음 절의 보고가 파일을 "w"로 덮어 러너가 트랙 결과를 못 봤고,
+        # 지도·분야 뒤의 return이 사슬을 끊어 함께 적은 다른 절이 조용히 버려졌다.
+        handled = False
+        reported = []
+
+        def emit(text):
             print(text)
             if args.report:
-                with open(args.report, "w", encoding="utf-8") as f:
+                with open(args.report, "a" if reported else "w", encoding="utf-8") as f:
+                    if reported:
+                        f.write("\n---\n\n")
                     f.write(text + "\n")
-            if not build_topics(payload):
-                return
+            reported.append(True)
+
+        tracks = build_tracks(payload)
+        if tracks:
+            handled = True
+            if args.dry_run:
+                # 이 절만 dry-run 관문이 없었다 — 확인만 하려던 실행이 tracks.yaml을 썼다.
+                print(f"[dry-run] {TRACKS_PATH}\n")
+                print(json.dumps(tracks, ensure_ascii=False, indent=2))
+            else:
+                added, updated, removed = merge_tracks(tracks)
+                report = [f"✅ 학습 트랙 갱신 — `{TRACKS_PATH}`", ""]
+                if added:
+                    report.append(f"- 추가: {', '.join(f'`{t}`' for t in added)} → 세션은 `daily/<id>/`에 쌓인다")
+                if updated:
+                    report.append(f"- 갱신: {', '.join(f'`{t}`' for t in updated)}")
+                if removed:
+                    report.append(
+                        f"- 목록에서 제거: {', '.join(f'`{t}`' for t in removed)} "
+                        "(그동안의 기록은 지우지 않는다)"
+                    )
+                report += ["", "> 다음 세션부터 러너가 \"오늘은 어느 트랙?\"을 묻고 그 폴더에 저장한다."]
+                emit("\n".join(report))
 
         overrides = build_overrides(payload)
         if overrides:
+            handled = True
             if args.dry_run:
                 print(f"[dry-run] {OVERRIDES_PATH}\n")
                 print(json.dumps(overrides, ensure_ascii=False, indent=2))
-                return
-            added_hidden, added_renamed = merge_overrides(overrides)
-            report = [f"✅ 지식 그래프 손보기 — `{OVERRIDES_PATH}`", ""]
-            if added_hidden:
-                report.append(f"- 감춤: {', '.join(f'`{h}`' for h in added_hidden)}")
-            if added_renamed:
-                report.append(
-                    "- 이름 합치기: "
-                    + ", ".join(f"`{r['from']}` → `{r['to']}`" for r in added_renamed)
-                )
-            if not added_hidden and not added_renamed:
-                report.append("- 바뀐 것 없음 (이미 적용돼 있다)")
-            report += [
-                "",
-                "> **노트와 원장은 그대로다.** 그래프에서만 빠진다 — 되돌리려면 "
-                f"`{OVERRIDES_PATH}`에서 그 줄을 지우면 다음 빌드에 돌아온다.",
-            ]
-            text = "\n".join(report)
-            print(text)
-            if args.report:
-                with open(args.report, "w", encoding="utf-8") as f:
-                    f.write(text + "\n")
-            return
+            else:
+                added_hidden, added_renamed = merge_overrides(overrides)
+                report = [f"✅ 지식 그래프 손보기 — `{OVERRIDES_PATH}`", ""]
+                if added_hidden:
+                    report.append(f"- 감춤: {', '.join(f'`{h}`' for h in added_hidden)}")
+                if added_renamed:
+                    report.append(
+                        "- 이름 합치기: "
+                        + ", ".join(f"`{r['from']}` → `{r['to']}`" for r in added_renamed)
+                    )
+                if not added_hidden and not added_renamed:
+                    report.append("- 바뀐 것 없음 (이미 적용돼 있다)")
+                report += [
+                    "",
+                    "> **노트와 원장은 그대로다.** 그래프에서만 빠진다 — 되돌리려면 "
+                    f"`{OVERRIDES_PATH}`에서 그 줄을 지우면 다음 빌드에 돌아온다.",
+                ]
+                emit("\n".join(report))
 
         subjects = build_subjects(payload)
         if subjects:
+            handled = True
             if args.dry_run:
                 print(f"[dry-run] {SUBJECTS_PATH}\n")
                 print(json.dumps(subjects, ensure_ascii=False, indent=2))
-                return
-            added, updated, removed = merge_subjects(subjects)
-            report = [f"✅ 분야 갱신 — `{SUBJECTS_PATH}`", ""]
-            if added:
-                report.append(f"- 추가: {', '.join(f'`{t}`' for t in added)}")
-            if updated:
-                report.append(f"- 별칭 추가: {', '.join(f'`{t}`' for t in updated)}")
-            if removed:
-                report.append(f"- 삭제: {', '.join(f'`{t}`' for t in removed)}")
-            report += [
-                "",
-                "> 다음 세션의 개념 지도부터 이 이름으로 합쳐집니다. 지난 노트는 고치지 "
-                "않습니다 — 합치기는 그래프를 만들 때 일어납니다(`build_concepts`).",
-            ]
-            text = "\n".join(report)
-            print(text)
-            if args.report:
-                with open(args.report, "w", encoding="utf-8") as f:
-                    f.write(text + "\n")
-            return
+            else:
+                added, updated, removed = merge_subjects(subjects)
+                report = [f"✅ 분야 갱신 — `{SUBJECTS_PATH}`", ""]
+                if added:
+                    report.append(f"- 추가: {', '.join(f'`{t}`' for t in added)}")
+                if updated:
+                    report.append(f"- 별칭 추가: {', '.join(f'`{t}`' for t in updated)}")
+                if removed:
+                    report.append(f"- 삭제: {', '.join(f'`{t}`' for t in removed)}")
+                report += [
+                    "",
+                    "> 다음 세션의 개념 지도부터 이 이름으로 합쳐집니다. 지난 노트는 고치지 "
+                    "않습니다 — 합치기는 그래프를 만들 때 일어납니다(`build_concepts`).",
+                ]
+                emit("\n".join(report))
 
         topics = build_topics(payload)
         if not topics:
+            if handled:
+                return  # 다른 절이 이미 처리됐다 — 주제가 없다고 실패가 아니다
             raise SystemExit(
-                "`## 트랙`·`## 분야`·`## 주제` 중 어느 절도 못 읽었다 — "
+                "`## 트랙`·`## 지도`·`## 분야`·`## 주제` 중 어느 절도 못 읽었다 — "
                 "`[설정]` Issue는 그중 한 절에 `### <이름>` 형식으로 적어야 한다."
             )
         if args.dry_run:
@@ -2302,11 +2310,7 @@ def main():
             "",
             "> 다음 `paper-scan`(매주 월요일 또는 Actions → Run workflow)부터 적용된다.",
         ]
-        text = "\n".join(report)
-        print(text)
-        if args.report:
-            with open(args.report, "w", encoding="utf-8") as f:
-                f.write(text + "\n")
+        emit("\n".join(report))
         return
 
     # `[자료]` — 세션 로그가 아니라 증류된 학습자료다. 별도 경로로 저장하고 끝낸다.
