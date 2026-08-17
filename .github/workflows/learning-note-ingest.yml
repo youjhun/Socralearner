@@ -8,7 +8,9 @@ name: learning-note-ingest
 # 그래서 모델은 평문만 쓰고(길면 코멘트로 이어서), 파일은 이 CI가 결정론적으로 만든다.
 # `mastery-consolidate`와 같은 계열 — 큰 쓰기를 모델에서 CI로 옮긴다. LLM 토큰 0.
 #
-# 경계: 이 워크플로가 쓰는 경로는 `daily/**` · `materials/**` · `papers/**` · `STATUS.md` · `**/mastery*` · `drills.md` · `concepts.json` · `topics.yaml` · `tracks.yaml` · `learning-spec.md` 뿐이다.
+# 경계: 이 워크플로가 쓰는 경로는 `daily/**` · `materials/**` · `papers/**` · `STATUS.md` · `**/mastery/**` · `mastery.md` · `drills.md` · `concepts.json` · `topics.yaml` · `tracks.yaml` · `learning-spec.md` · `subjects.yaml` · `concepts-overrides.yaml` 뿐이다.
+# (2026-08-15: 뒤의 셋이 이 줄에도 `git add`에도 없었다 — `[설정] ## 분야`·`## 지도`가 쓴 것과
+#  `## 이해도 승급` 조각이 조용히 버려지고 있었다. `|| git add -A` 폴백이 그것을 가리고 있었을 뿐이다.)
 # (`topics.yaml`은 2026-08-04에 들어왔다 — 러너가 `[설정]` Issue로 연구 주제를 갱신한다.
 #  사람이 YAML을 손으로 쓰지 않게 하려는 것이고, 쓰는 것은 여전히 CI다.)
 # 지금까지 러너의 PAT이 main에 직접 쓰던 바로 그 범위이므로 새 권한이 아니다 —
@@ -101,7 +103,31 @@ jobs:
           fi
           git config user.name  "socralearner[bot]"
           git config user.email "noreply@github.com"
-          git add -A daily materials papers STATUS.md mastery.md drills.md concepts.json topics.yaml tracks.yaml learning-spec.md 2>/dev/null || git add -A
+          # 쓰는 경로를 **하나도 빠짐없이** 적는다. 빠진 것은 조용히 사라진다.
+          #
+          # 2026-08-15 실측으로 셋이 빠져 있던 것을 찾았다:
+          #   · `subjects.yaml`           — `[설정] ## 분야`(분야 합치기)가 쓴다
+          #   · `concepts-overrides.yaml` — `[설정] ## 지도`(감추기·이름 합치기)가 쓴다
+          #   · `**/mastery/**`           — `## 이해도 승급`이 낳는 조각. 이게 가장 위험했다
+          #
+          # 지금까지 안 터진 이유는 `|| git add -A` 폴백이다 — 목록의 `materials`·`drills.md`
+          # 같은 것이 아직 없는 저장소에서 앞 명령이 `fatal: pathspec …`으로 죽어 전체 add로
+          # 떨어졌다. **자료가 다 생긴 성숙한 저장소에서는 화이트리스트가 실제로 적용되어
+          # 세 파일이 조용히 버려진다.** 그래서 폴백에 기대는 것을 그만두고, 경로마다 따로
+          # 걸어 없는 것만 넘긴다.
+          #
+          # `mastery/` 조각이 남는 것이 특히 중요하다: 조각이 저장소에 있으면 `mastery.md`는
+          # `consolidate_mastery.py`가 언제든 다시 만들 수 있는 **파생물**이 된다. 안 남으면
+          # 한 세션의 승급을 놓쳤을 때 복구할 곳이 Issue 본문뿐이다.
+          #
+          # `**/mastery/**`인 이유: 조각은 `<LEARNING_ROOT>/<track>/mastery/`에 떨어지는데
+          # (`write_mastery_fragment`) 트랙이 없는 저장소에서는 루트 `mastery/`다. 실측으로
+          # 글롭 pathspec이 둘 다 잡는 것을 확인했다.
+          for p in daily materials papers STATUS.md mastery.md drills.md \
+                   concepts.json topics.yaml tracks.yaml learning-spec.md \
+                   subjects.yaml concepts-overrides.yaml ':(glob)**/mastery/**'; do
+            git add -A -- "$p" 2>/dev/null || true
+          done
           git commit -m "learning: 세션 노트 수집 (Issue #${{ steps.fetch.outputs.number }})"
           for i in 1 2 3 4; do
             git pull --rebase origin main && git push origin HEAD:main && exit 0
