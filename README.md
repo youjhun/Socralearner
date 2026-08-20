@@ -57,11 +57,11 @@ Socralearner는 매 세션 **내가 먼저 설명하고 → AI가 약한 곳을 
 
 | 문서 | 내용 |
 |---|---|
-| **[SETUP.md](./SETUP.md)** | 처음 세팅 A→Z (repo 만들기 → 토큰 → Custom GPT → 첫 세션) |
+| **[SETUP.md](./SETUP.md)** | 처음 세팅 A→Z (저장소 만들기 → 앱 설치 → ChatGPT 커넥터 연결 → 첫 세션) |
 | [GUIDE.md](./GUIDE.md) | 매일 어떻게 쓰나 · 기록 읽는 법 · 잘 쓰는 요령 |
 | [METHOD.md](./METHOD.md) | 왜 이렇게 공부하는가 (방법의 철학) |
 | [MIGRATION.md](./MIGRATION.md) | **이미 저장소를 만든 사람용** — 바뀐 부분 가져오기 (2026-08-03: 그래프가 단어 단위로 생기던 문제) |
-| [runner/](./runner/) | Custom GPT에 붙여넣을 지침 + Action 스키마 |
+| [runner/](./runner/) | 러너 지침 대본 + 모드별 대본. 커넥터를 쓰면 붙여넣을 것이 없다(무료 계정용 옛 경로만 Action 스키마를 쓴다) |
 | [topics.yaml](./topics.yaml) | 따라갈 연구 주제 — 적어 두면 **매주 새 논문 자동 수집** |
 | [presets/toeic/](./presets/toeic/) | **시험 트랙 프리셋** — 토익 등 시험은 별도 repo로 (섞으면 개념 그래프가 오염된다) |
 
