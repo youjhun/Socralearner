@@ -30,7 +30,7 @@ BUDGET = 7000       # 우리 예산 — 남는 1,000자는 `# 이 학습자` 블
 # 그래서 길이 예산을 먹지 않고, 고쳐도 지침을 다시 붙여넣지 않아도 된다.
 MODES = ("runner/paper-mode.md", "runner/exam-mode.md", "runner/topics.md",
          "runner/subject-mode.md", "runner/research-mode.md",
-         "runner/concept-map.md")
+         "runner/concept-map.md", "runner/concept-mode.md")
 
 # CI(scripts/ingest_learning_note.py 등)가 이 이름으로 노트를 읽는다.
 # 하나라도 사라지면 그 절은 영영 파일로 만들어지지 않는다.
