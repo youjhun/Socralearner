@@ -156,7 +156,13 @@ PARKING_SECTION = "Parking Lot"
 ARTIFACT_SECTION = "아티팩트"
 META_SECTION = "메타"
 # meta.yaml에 받는 키. 모르는 키는 버린다 — 러너가 지어낸 필드로 파일이 자라지 않게.
-META_KEYS = ("title", "authors", "year", "venue", "link", "understanding", "flow", "next_section")
+# `status`가 들어 있는 이유 (2026-08-23): `listPapers`(mcp-core/state.ts)가 이 키를 읽어
+# `get_state.papers[].status`로 러너에게 보내는데, **그 키를 쓰는 곳이 없어 늘 비어 있었다.**
+# 그래서 러너는 다 읽은 논문과 읽는 중인 논문을 구별할 수 없었고, 실제로 완독한 논문의
+# 절을 다시 복원하려 든 적이 있다(2026-08-23 실사용). 읽는 쪽이 있는데 쓰는 쪽이 없으면
+# 그 계약은 거짓이다 — 여기서 채운다.
+META_KEYS = ("title", "authors", "year", "venue", "link", "understanding", "flow",
+             "next_section", "status")
 UNDERSTANDING = ("미이해", "부분 이해", "기능적 이해", "비판적 이해")
 
 # 논문 흐름 5단계 — **사용자가 자기 말로 설명해 통과한 단계만** 여기 쌓인다.
